@@ -33,6 +33,7 @@ type GetBrandsParams struct {
 }
 
 // GetBrands returns a list of brands with optional filters. brandId may be null until carrier assignment.
+// Each brand carries `carrierSuspensions` (carrier brand suspension rules; active while liftedAt is null).
 func (s *BrandsService) GetBrands(ctx context.Context, params GetBrandsParams, opts *RequestOptions) (*Response, error) {
 	qs := buildQueryString(map[string]string{
 		"id":                     params.ID,
@@ -104,8 +105,11 @@ func (s *BrandsService) CreateBrand(ctx context.Context, params CreateBrandParam
 
 // TollFreeBrandDetails is the Toll-Free brand sub-object (brandData.tollFree). On create,
 // BusinessRegistrationType, LegalEntityType, TaxID, CountryCode, and SupportPhone are required;
-// TaxIDIssuingCountry, BusinessDBA, and BusinessWebsite are optional. When reused on UpdateBrandData every field is
-// optional (only populated fields are sent). SupportPhone must be E.164 with an optional leading
+// TaxIDIssuingCountry, BusinessDBA, and BusinessWebsite are optional. BusinessVerificationID is required for a group
+// whose toll-free brands need a business verification; with it set, BusinessRegistrationType, TaxID, CountryCode and
+// TaxIDIssuingCountry may be left empty and come from the business verification. When reused on UpdateBrandData every
+// field is optional (only populated fields are sent); leave BusinessVerificationID empty there, as it can't be changed.
+// SupportPhone must be E.164 with an optional leading
 // "+" and no spaces, parentheses or hyphens (e.g. "17025550100").
 type TollFreeBrandDetails struct {
 	// BusinessRegistrationType is one of EIN, CBN, NEQ, PROVINCIAL_NUMBER, CRN, VAT, ACN, ABN, BRN,
@@ -119,21 +123,26 @@ type TollFreeBrandDetails struct {
 	TaxIDIssuingCountry string `json:"taxIdIssuingCountry,omitempty"`
 	BusinessDBA         string `json:"businessDBA,omitempty"`
 	BusinessWebsite     string `json:"businessWebsite,omitempty"`
+	// BusinessVerificationID names the VERIFIED business verification a new brand uses (starts with BV). Create only.
+	// Required for a group whose toll-free brands need a business verification; any other group gets 400 if it is set.
+	BusinessVerificationID string `json:"businessVerificationId,omitempty"`
 }
 
 // CreateTollFreeBrandData represents the data for creating a Toll-Free (TFN) brand.
 // registrationType is forced to TOLL_FREE server-side — do not set it here.
+// With TollFree.BusinessVerificationID set, the legal fields (CompanyName, Street, City, State, PostalCode, Country,
+// FirstName and LastName) may be left empty: the business verification's values replace them.
 type CreateTollFreeBrandData struct {
 	SubgroupID             string               `json:"subgroupId"`
 	DisplayName            string               `json:"displayName"`
-	CompanyName            string               `json:"companyName"`
-	Street                 string               `json:"street"`
-	City                   string               `json:"city"`
-	State                  string               `json:"state"`
-	PostalCode             string               `json:"postalCode"`
+	CompanyName            string               `json:"companyName,omitempty"`
+	Street                 string               `json:"street,omitempty"`
+	City                   string               `json:"city,omitempty"`
+	State                  string               `json:"state,omitempty"`
+	PostalCode             string               `json:"postalCode,omitempty"`
 	Email                  string               `json:"email"`
-	FirstName              string               `json:"firstName"`
-	LastName               string               `json:"lastName"`
+	FirstName              string               `json:"firstName,omitempty"`
+	LastName               string               `json:"lastName,omitempty"`
 	Website                string               `json:"website"`
 	TollFree               TollFreeBrandDetails `json:"tollFree"`
 	ReferenceID            string               `json:"referenceId,omitempty"`
@@ -157,17 +166,17 @@ func (s *BrandsService) CreateTollFreeBrand(ctx context.Context, params CreateTo
 	return s.client.doJSON(ctx, "POST", "/brand/toll-free", params.BrandData, opts)
 }
 
-// GetBusinessVerificationParams are the parameters for the GetBusinessVerification method.
-type GetBusinessVerificationParams struct {
+// GetBusinessVerificationsParams are the parameters for the GetBusinessVerifications method.
+type GetBusinessVerificationsParams struct {
 	GroupID string
-	// SubgroupID is optional: the subgroup whose business verification to read. Required for a group that verifies
+	// SubgroupID is optional: the subgroup whose business verifications to list. Required for a group that verifies
 	// each subgroup's business separately.
 	SubgroupID string
 }
 
-// GetBusinessVerification returns a group's business verification, or one subgroup's in a group that verifies each
-// subgroup's business separately: whether its toll-free brands need one, its status and the submitted details.
-func (s *BrandsService) GetBusinessVerification(ctx context.Context, params GetBusinessVerificationParams, opts *RequestOptions) (*Response, error) {
+// GetBusinessVerifications lists a group's business verifications, newest first, or one subgroup's in a group that
+// verifies each subgroup's business separately, and whether the group's toll-free brands need one.
+func (s *BrandsService) GetBusinessVerifications(ctx context.Context, params GetBusinessVerificationsParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"groupId": params.GroupID}); err != nil {
 		return nil, err
 	}
@@ -176,8 +185,25 @@ func (s *BrandsService) GetBusinessVerification(ctx context.Context, params GetB
 	return s.client.doJSON(ctx, "GET", path+qs, nil, opts)
 }
 
-// SubmitBusinessVerificationParams are the parameters for the SubmitBusinessVerification method.
-type SubmitBusinessVerificationParams struct {
+// GetBusinessVerificationParams are the parameters for the GetBusinessVerification method.
+type GetBusinessVerificationParams struct {
+	GroupID string
+	// BusinessVerificationID is the ID of the business verification to read (starts with BV).
+	BusinessVerificationID string
+}
+
+// GetBusinessVerification returns one of a group's business verifications by its ID, plus whether the group's
+// toll-free brands need one. 404 when it isn't one of the group's.
+func (s *BrandsService) GetBusinessVerification(ctx context.Context, params GetBusinessVerificationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID, "businessVerificationId": params.BusinessVerificationID}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/brand/business-verification/%s/%s", url.PathEscape(params.GroupID), url.PathEscape(params.BusinessVerificationID))
+	return s.client.doJSON(ctx, "GET", path, nil, opts)
+}
+
+// CreateBusinessVerificationParams are the parameters for the CreateBusinessVerification method.
+type CreateBusinessVerificationParams struct {
 	GroupID string
 	// SubgroupID is optional: the subgroup whose business this verifies, which must be active. Required for a group
 	// that verifies each subgroup's business separately.
@@ -186,10 +212,10 @@ type SubmitBusinessVerificationParams struct {
 	Details map[string]any
 }
 
-// SubmitBusinessVerification submits or updates a group's business verification, or one subgroup's in a group that
-// verifies each subgroup's business separately. Allowed when it is not started or needs changes. Review usually takes
-// 1–2 business days; the toll-free brands it covers stay pending until it is verified.
-func (s *BrandsService) SubmitBusinessVerification(ctx context.Context, params SubmitBusinessVerificationParams, opts *RequestOptions) (*Response, error) {
+// CreateBusinessVerification creates and submits a new business verification for a group, or for one subgroup in a
+// group that verifies each subgroup's business separately. Review usually takes 1–2 business days; once it is
+// VERIFIED, a new toll-free brand can use it as TollFree.BusinessVerificationID.
+func (s *BrandsService) CreateBusinessVerification(ctx context.Context, params CreateBusinessVerificationParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"groupId": params.GroupID}); err != nil {
 		return nil, err
 	}
@@ -198,7 +224,30 @@ func (s *BrandsService) SubmitBusinessVerification(ctx context.Context, params S
 	}
 	path := fmt.Sprintf("/brand/business-verification/%s", url.PathEscape(params.GroupID))
 	qs := buildQueryString(map[string]string{"subgroupId": params.SubgroupID})
-	return s.client.doJSON(ctx, "PUT", path+qs, params.Details, opts)
+	return s.client.doJSON(ctx, "POST", path+qs, params.Details, opts)
+}
+
+// UpdateBusinessVerificationParams are the parameters for the UpdateBusinessVerification method.
+type UpdateBusinessVerificationParams struct {
+	GroupID string
+	// BusinessVerificationID is the ID of the business verification to correct (starts with BV).
+	BusinessVerificationID string
+	// Details is the corrected business, its address and an authorized representative, sent as the request body.
+	Details map[string]any
+}
+
+// UpdateBusinessVerification corrects and resubmits a business verification. Allowed only while it needs changes
+// (400 otherwise). Review usually takes 1–2 business days; the toll-free brands that use it stay pending until it is
+// verified.
+func (s *BrandsService) UpdateBusinessVerification(ctx context.Context, params UpdateBusinessVerificationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID, "businessVerificationId": params.BusinessVerificationID}); err != nil {
+		return nil, err
+	}
+	if params.Details == nil {
+		return nil, &ValidationError{Field: "details"}
+	}
+	path := fmt.Sprintf("/brand/business-verification/%s/%s", url.PathEscape(params.GroupID), url.PathEscape(params.BusinessVerificationID))
+	return s.client.doJSON(ctx, "PUT", path, params.Details, opts)
 }
 
 // GetTollFreeIsvAccountParams are the parameters for the GetTollFreeIsvAccount method.

@@ -54,6 +54,13 @@ type GetCampaignsParams struct {
 // in the window; the volumes say how much traffic sits behind it. A campaign's figure is scored from the
 // campaign's own summed counters, never averaged from its numbers. For a live figure use GET /number/health
 // or GET /campaign/health.
+//
+// Every record also carries a `carrierSuspensions` array -- one entry per carrier suspension of the
+// campaign: `{ mnoId, mnoName, source, suspensionCategory, reason, tcrEventType, suspendedAt, liftedAt }`.
+// An entry is active while `liftedAt` is null. `mnoId` is the TCR carrier network id (same ids as `mnoIds`);
+// `source` is CARRIER, UPSTREAM or BRAND (the carrier suspended the whole brand). A suspension applies to one
+// carrier, so `status` stays ACTIVE. Subscribe to the CAMPAIGN_SUSPENDED / CAMPAIGN_UNSUSPENDED webhook events
+// to be told when an entry opens or is lifted.
 func (s *CampaignsService) GetCampaigns(ctx context.Context, params GetCampaignsParams, opts *RequestOptions) (*Response, error) {
 	qs := buildQueryString(map[string]string{
 		"id":               params.ID,

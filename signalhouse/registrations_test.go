@@ -460,11 +460,11 @@ func TestBusinessVerification(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if _, err := client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID: "G/1"}, nil); err != nil {
+	if _, err := client.Brands.GetBusinessVerifications(ctx, GetBusinessVerificationsParams{GroupID: "G/1"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if last.method != "GET" || last.uri != "/brand/business-verification/G%2F1" || last.body != nil {
-		t.Fatalf("read contract: %s %s %v", last.method, last.uri, last.body)
+		t.Fatalf("list contract: %s %s %v", last.method, last.uri, last.body)
 	}
 
 	details := map[string]any{
@@ -476,11 +476,11 @@ func TestBusinessVerification(t *testing.T) {
 			"jobTitle": "Owner", "jobLevel": "CEO",
 		},
 	}
-	if _, err := client.Brands.SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{GroupID: "G/1", Details: details}, nil); err != nil {
+	if _, err := client.Brands.CreateBusinessVerification(ctx, CreateBusinessVerificationParams{GroupID: "G/1", Details: details}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if last.method != "PUT" || last.uri != "/brand/business-verification/G%2F1" {
-		t.Fatalf("submit contract: %s %s", last.method, last.uri)
+	if last.method != "POST" || last.uri != "/brand/business-verification/G%2F1" {
+		t.Fatalf("create contract: %s %s", last.method, last.uri)
 	}
 	sent, _ := json.Marshal(last.body)
 	want, _ := json.Marshal(details)
@@ -488,19 +488,52 @@ func TestBusinessVerification(t *testing.T) {
 		t.Fatalf("details must be the whole body: %s", sent)
 	}
 
+	if _, err := client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID: "G/1", BusinessVerificationID: "BV/1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "GET" || last.uri != "/brand/business-verification/G%2F1/BV%2F1" || last.body != nil {
+		t.Fatalf("read contract: %s %s %v", last.method, last.uri, last.body)
+	}
+
+	if _, err := client.Brands.UpdateBusinessVerification(ctx, UpdateBusinessVerificationParams{GroupID: "G/1", BusinessVerificationID: "BV/1", Details: details}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "PUT" || last.uri != "/brand/business-verification/G%2F1/BV%2F1" {
+		t.Fatalf("update contract: %s %s", last.method, last.uri)
+	}
+	sent, _ = json.Marshal(last.body)
+	if string(sent) != string(want) {
+		t.Fatalf("details must be the whole update body: %s", sent)
+	}
+
 	refused := []struct {
 		name  string
 		field string
 		call  func() (*Response, error)
 	}{
+		{"list without groupId", "groupId", func() (*Response, error) {
+			return client.Brands.GetBusinessVerifications(ctx, GetBusinessVerificationsParams{}, nil)
+		}},
+		{"create without groupId", "groupId", func() (*Response, error) {
+			return client.Brands.CreateBusinessVerification(ctx, CreateBusinessVerificationParams{Details: details}, nil)
+		}},
+		{"create without details", "details", func() (*Response, error) {
+			return client.Brands.CreateBusinessVerification(ctx, CreateBusinessVerificationParams{GroupID: "G1"}, nil)
+		}},
 		{"read without groupId", "groupId", func() (*Response, error) {
-			return client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{}, nil)
+			return client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{BusinessVerificationID: "BV1"}, nil)
 		}},
-		{"submit without groupId", "groupId", func() (*Response, error) {
-			return client.Brands.SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{Details: details}, nil)
+		{"read without businessVerificationId", "businessVerificationId", func() (*Response, error) {
+			return client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID: "G1"}, nil)
 		}},
-		{"submit without details", "details", func() (*Response, error) {
-			return client.Brands.SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{GroupID: "G1"}, nil)
+		{"update without groupId", "groupId", func() (*Response, error) {
+			return client.Brands.UpdateBusinessVerification(ctx, UpdateBusinessVerificationParams{BusinessVerificationID: "BV1", Details: details}, nil)
+		}},
+		{"update without businessVerificationId", "businessVerificationId", func() (*Response, error) {
+			return client.Brands.UpdateBusinessVerification(ctx, UpdateBusinessVerificationParams{GroupID: "G1", Details: details}, nil)
+		}},
+		{"update without details", "details", func() (*Response, error) {
+			return client.Brands.UpdateBusinessVerification(ctx, UpdateBusinessVerificationParams{GroupID: "G1", BusinessVerificationID: "BV1"}, nil)
 		}},
 	}
 	for _, refusal := range refused {
@@ -525,19 +558,19 @@ func TestBusinessVerificationSubgroup(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	if _, err := client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID: "G/1", SubgroupID: "S0000001"}, nil); err != nil {
+	if _, err := client.Brands.GetBusinessVerifications(ctx, GetBusinessVerificationsParams{GroupID: "G/1", SubgroupID: "S0000001"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if last.method != "GET" || last.uri != "/brand/business-verification/G%2F1?subgroupId=S0000001" || last.body != nil {
-		t.Fatalf("subgroup read contract: %s %s %v", last.method, last.uri, last.body)
+		t.Fatalf("subgroup list contract: %s %s %v", last.method, last.uri, last.body)
 	}
 
 	details := map[string]any{"businessName": "Acme Inc", "registrationType": "EIN", "registrationNumber": "12-3456789"}
-	if _, err := client.Brands.SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{GroupID: "G/1", SubgroupID: "S0000001", Details: details}, nil); err != nil {
+	if _, err := client.Brands.CreateBusinessVerification(ctx, CreateBusinessVerificationParams{GroupID: "G/1", SubgroupID: "S0000001", Details: details}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if last.method != "PUT" || last.uri != "/brand/business-verification/G%2F1?subgroupId=S0000001" {
-		t.Fatalf("subgroup submit contract: %s %s", last.method, last.uri)
+	if last.method != "POST" || last.uri != "/brand/business-verification/G%2F1?subgroupId=S0000001" {
+		t.Fatalf("subgroup create contract: %s %s", last.method, last.uri)
 	}
 	sent, _ := json.Marshal(last.body)
 	want, _ := json.Marshal(details)
@@ -546,7 +579,7 @@ func TestBusinessVerificationSubgroup(t *testing.T) {
 	}
 
 	// The subgroup ID is escaped as a query value.
-	if _, err := client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID: "G1", SubgroupID: "S&1 2"}, nil); err != nil {
+	if _, err := client.Brands.GetBusinessVerifications(ctx, GetBusinessVerificationsParams{GroupID: "G1", SubgroupID: "S&1 2"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if last.uri != "/brand/business-verification/G1?subgroupId=S%261+2" {
@@ -554,17 +587,17 @@ func TestBusinessVerificationSubgroup(t *testing.T) {
 	}
 
 	// An empty subgroup ID leaves the URL exactly as it was.
-	if _, err := client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID: "G1", SubgroupID: ""}, nil); err != nil {
+	if _, err := client.Brands.GetBusinessVerifications(ctx, GetBusinessVerificationsParams{GroupID: "G1", SubgroupID: ""}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if last.uri != "/brand/business-verification/G1" {
-		t.Fatalf("unset subgroup sent on read: %s", last.uri)
+		t.Fatalf("unset subgroup sent on list: %s", last.uri)
 	}
-	if _, err := client.Brands.SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{GroupID: "G1", SubgroupID: "", Details: details}, nil); err != nil {
+	if _, err := client.Brands.CreateBusinessVerification(ctx, CreateBusinessVerificationParams{GroupID: "G1", SubgroupID: "", Details: details}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if last.uri != "/brand/business-verification/G1" {
-		t.Fatalf("unset subgroup sent on submit: %s", last.uri)
+		t.Fatalf("unset subgroup sent on create: %s", last.uri)
 	}
 
 	refused := []struct {
@@ -572,14 +605,14 @@ func TestBusinessVerificationSubgroup(t *testing.T) {
 		field string
 		call  func() (*Response, error)
 	}{
-		{"read with a subgroup but no groupId", "groupId", func() (*Response, error) {
-			return client.Brands.GetBusinessVerification(ctx, GetBusinessVerificationParams{SubgroupID: "S0000001"}, nil)
+		{"list with a subgroup but no groupId", "groupId", func() (*Response, error) {
+			return client.Brands.GetBusinessVerifications(ctx, GetBusinessVerificationsParams{SubgroupID: "S0000001"}, nil)
 		}},
-		{"submit with a subgroup but no groupId", "groupId", func() (*Response, error) {
-			return client.Brands.SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{SubgroupID: "S0000001", Details: details}, nil)
+		{"create with a subgroup but no groupId", "groupId", func() (*Response, error) {
+			return client.Brands.CreateBusinessVerification(ctx, CreateBusinessVerificationParams{SubgroupID: "S0000001", Details: details}, nil)
 		}},
-		{"submit with a subgroup but no details", "details", func() (*Response, error) {
-			return client.Brands.SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{GroupID: "G1", SubgroupID: "S0000001"}, nil)
+		{"create with a subgroup but no details", "details", func() (*Response, error) {
+			return client.Brands.CreateBusinessVerification(ctx, CreateBusinessVerificationParams{GroupID: "G1", SubgroupID: "S0000001"}, nil)
 		}},
 	}
 	for _, refusal := range refused {
@@ -593,6 +626,72 @@ func TestBusinessVerificationSubgroup(t *testing.T) {
 				t.Fatalf("request sent: %s %s", last.method, last.uri)
 			}
 		})
+	}
+}
+
+func TestCreateTollFreeBrandLeavesOutEmptyLegalFields(t *testing.T) {
+	server, last := newCaptureServer(t)
+	client, err := NewClient(Config{APIKey: "test", BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	// A brand on a business verification sends only what the verification doesn't supply.
+	verified := CreateTollFreeBrandParams{BrandData: CreateTollFreeBrandData{
+		SubgroupID:  "S0000001",
+		DisplayName: "Acme",
+		Email:       "support@acme.example",
+		Website:     "https://acme.example",
+		TollFree: TollFreeBrandDetails{
+			LegalEntityType:        "PRIVATE_COMPANY",
+			SupportPhone:           "17025550100",
+			BusinessVerificationID: "BV0000000001",
+		},
+	}}
+	if _, err := client.Brands.CreateTollFreeBrand(ctx, verified, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "POST" || last.uri != "/brand/toll-free" {
+		t.Fatalf("create contract: %s %s", last.method, last.uri)
+	}
+	for _, field := range []string{"companyName", "street", "city", "state", "postalCode", "country", "firstName", "lastName"} {
+		if _, sent := last.body[field]; sent {
+			t.Fatalf("empty %s was sent: %v", field, last.body)
+		}
+	}
+	tollFree, _ := last.body["tollFree"].(map[string]interface{})
+	for _, field := range []string{"businessRegistrationType", "taxId", "countryCode", "taxIdIssuingCountry"} {
+		if _, sent := tollFree[field]; sent {
+			t.Fatalf("empty tollFree.%s was sent: %v", field, tollFree)
+		}
+	}
+	if tollFree["businessVerificationId"] != "BV0000000001" || last.body["subgroupId"] != "S0000001" || last.body["email"] != "support@acme.example" {
+		t.Fatalf("set fields lost: %v", last.body)
+	}
+
+	// A brand without one still sends every legal field it fills in, and no business verification ID.
+	full := CreateTollFreeBrandParams{BrandData: CreateTollFreeBrandData{
+		SubgroupID: "S0000001", DisplayName: "Acme", CompanyName: "Acme Inc", Street: "1 Main St", City: "Austin",
+		State: "TX", PostalCode: "78701", Email: "support@acme.example", FirstName: "Ada", LastName: "Lee",
+		Website: "https://acme.example",
+		TollFree: TollFreeBrandDetails{
+			BusinessRegistrationType: "EIN", LegalEntityType: "PRIVATE_COMPANY", TaxID: "12-3456789", CountryCode: "US",
+			SupportPhone: "17025550100",
+		},
+	}}
+	if _, err := client.Brands.CreateTollFreeBrand(ctx, full, nil); err != nil {
+		t.Fatal(err)
+	}
+	legal := map[string]interface{}{"companyName": "Acme Inc", "street": "1 Main St", "city": "Austin", "state": "TX", "postalCode": "78701", "firstName": "Ada", "lastName": "Lee"}
+	for field, value := range legal {
+		if last.body[field] != value {
+			t.Fatalf("%s = %v, want %v", field, last.body[field], value)
+		}
+	}
+	tollFree, _ = last.body["tollFree"].(map[string]interface{})
+	if _, sent := tollFree["businessVerificationId"]; sent || tollFree["taxId"] != "12-3456789" || tollFree["businessRegistrationType"] != "EIN" {
+		t.Fatalf("tollFree = %v", tollFree)
 	}
 }
 
@@ -613,8 +712,8 @@ func TestTollFreeIsvAccount(t *testing.T) {
 
 	account := SetTollFreeIsvAccountParams{
 		GroupID:      "G/1",
-		AccountSID:   "AC0123456789abcdef0123456789abcdef",
-		APIKeySID:    "SK0123456789abcdef0123456789abcdef",
+		AccountSID:   "AC00000000000000000000000000000000",
+		APIKeySID:    "SK11111111111111111111111111111111",
 		APIKeySecret: "test-key-secret",
 	}
 	if _, err := client.Brands.SetTollFreeIsvAccount(ctx, account, nil); err != nil {

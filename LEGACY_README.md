@@ -8,6 +8,8 @@
 
 Official Go SDK for the SignalHouse API. Provides a type-safe client for managing SMS/MMS messaging, phone numbers, 10DLC brands/campaigns, billing, and more.
 
+Full API reference and guides: https://app2.signalhouse.io/docs
+
 ## Requirements
 
 - Go 1.21+

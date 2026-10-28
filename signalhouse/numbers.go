@@ -518,9 +518,12 @@ func (s *NumbersAdminService) ChangePortingStatus(ctx context.Context, params Ch
 	return s.client.doJSON(ctx, "PUT", path, body, opts)
 }
 
-// ApprovePortRequestParams are the parameters for the ApprovePortRequest admin method.
+// ApprovePortRequestParams are the parameters for the ApprovePortRequest admin method. SubGroupID
+// assigns a subgroup when the request has none yet; it is ignored if the request already has one
+// assigned -- an existing assignment is never overwritten.
 type ApprovePortRequestParams struct {
-	PortingID string
+	PortingID  string
+	SubGroupID string
 }
 
 // ApprovePortRequest approves a port-in request. Admin only.
@@ -529,7 +532,11 @@ func (s *NumbersAdminService) ApprovePortRequest(ctx context.Context, params App
 		return nil, err
 	}
 	path := fmt.Sprintf("/number/portin/%s/approve", url.PathEscape(params.PortingID))
-	return s.client.doJSON(ctx, "POST", path, nil, opts)
+	var body map[string]string
+	if params.SubGroupID != "" {
+		body = map[string]string{"subGroupId": params.SubGroupID}
+	}
+	return s.client.doJSON(ctx, "POST", path, body, opts)
 }
 
 // GetShortCodeAcquisitionRequestsParams are filters for staff-only Short Code acquisition requests.

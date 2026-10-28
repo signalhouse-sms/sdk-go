@@ -75,6 +75,19 @@ if git ls-remote --exit-code --tags origin "refs/tags/v$V" >/dev/null; then
 	exit 0
 fi
 
+# A run that pushed main but died before tagging: tag the commit that already carries this tree.
+MATCH=$(git log --format='%H %T' HEAD | awk -v t="$SHIM_TREE" '$2 == t { print $1; exit }')
+if [ -n "$MATCH" ]; then
+	git tag -a "v$V" -m "v$V" "$MATCH" || fail "tag v$V"
+	git push --quiet origin "refs/tags/v$V" || fail "push tag v$V"
+	echo "$LEGACY_REPO v$V tagged at existing commit $MATCH"
+	exit 0
+fi
+
+# Never commit an older shim over a newer main; a release missed in between is tagged above, not re-pushed.
+HEAD_PIN=$({ git show HEAD:go.mod 2>/dev/null || true; } | awk -v m="$MODULE" '$1 == "require" && $2 == m { print $3 } $1 == m { print $2 }' | head -1)
+[ "$(printf '%s\n%s\n' "${HEAD_PIN#v}" "$V" | sort -V | tail -1)" = "$V" ] || fail "$LEGACY_REPO main is at $HEAD_PIN, newer than v$V; not moving main backwards"
+
 if [ "$(git rev-parse 'HEAD^{tree}')" != "$SHIM_TREE" ]; then
 	git commit --quiet -m "Release v$V: shim for $MODULE v$V" || fail "commit"
 	git push --quiet origin HEAD:refs/heads/main || fail "push $LEGACY_REPO main (not a fast-forward? re-run)"

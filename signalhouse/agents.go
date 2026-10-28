@@ -634,6 +634,98 @@ func (s *AgentsService) DeleteAgentEndpoint(ctx context.Context, params DeleteAg
 	return s.client.doJSON(ctx, "DELETE", path, nil, opts)
 }
 
+// GetAgentContactPausesParams are the parameters for GetAgentContactPauses.
+type GetAgentContactPausesParams struct {
+	// GroupID is the group whose paused conversations to list. Required.
+	GroupID string
+	// SubgroupID narrows to one subgroup.
+	SubgroupID string
+	// Channel narrows to one channel ("sms").
+	Channel string
+	// EndpointValue narrows to one agent number (digits only, no "+").
+	EndpointValue string
+	// ContactIdentifier narrows to one contact number (digits only, no "+").
+	ContactIdentifier string
+}
+
+// GetAgentContactPauses lists paused agent conversations in a group, newest first. A
+// paused conversation is one a person took over; the agent stays out of it until it is
+// resumed. Each pause carries groupId, subgroupId, channel, endpointValue,
+// contactIdentifier, reason ("human_reply", "escalation" or "manual"), pausedBy, createdAt, and
+// updatedAt.
+// Roles: api, admin, developer, billing, user.
+// GET /agent/pauses
+func (s *AgentsService) GetAgentContactPauses(ctx context.Context, params GetAgentContactPausesParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID}); err != nil {
+		return nil, err
+	}
+	qs := buildQueryString(map[string]string{
+		"groupId":           params.GroupID,
+		"subgroupId":        params.SubgroupID,
+		"channel":           params.Channel,
+		"endpointValue":     params.EndpointValue,
+		"contactIdentifier": params.ContactIdentifier,
+	})
+	return s.client.doJSON(ctx, "GET", "/agent/pauses"+qs, nil, opts)
+}
+
+// PauseAgentConversationData is the JSON body for pausing an agent on a conversation.
+type PauseAgentConversationData struct {
+	// Reason is why the conversation is paused: "human_reply" (a person replied by hand)
+	// or "manual" (the default when omitted).
+	Reason string `json:"reason,omitempty"`
+}
+
+// PauseAgentConversationParams are the parameters for PauseAgentConversation.
+type PauseAgentConversationParams struct {
+	// Channel is the channel; must be "sms".
+	Channel string
+	// EndpointValue is the agent's number: 10 to 15 digits, country code included, no "+".
+	EndpointValue string
+	// ContactIdentifier is the contact's number: 10 to 15 digits, country code included,
+	// no "+".
+	ContactIdentifier string
+	// PauseData is the optional pause reason; the zero value sends an empty object.
+	PauseData PauseAgentConversationData
+}
+
+// PauseAgentConversation pauses an agent on one conversation (its number + one contact).
+// The agent stops answering that contact on that number until the conversation is
+// resumed; there is no timer. The conversation's pending replies are rejected. Pausing a
+// paused conversation keeps the original pause. Returns the pause.
+// Roles: api, admin, developer, billing, user.
+// PUT /agent/pauses/{channel}/{endpointValue}/{contactIdentifier}
+func (s *AgentsService) PauseAgentConversation(ctx context.Context, params PauseAgentConversationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"channel": params.Channel, "endpointValue": params.EndpointValue, "contactIdentifier": params.ContactIdentifier}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/agent/pauses/%s/%s/%s", url.PathEscape(params.Channel), url.PathEscape(params.EndpointValue), url.PathEscape(params.ContactIdentifier))
+	return s.client.doJSON(ctx, "PUT", path, params.PauseData, opts)
+}
+
+// ResumeAgentConversationParams are the parameters for ResumeAgentConversation.
+type ResumeAgentConversationParams struct {
+	// Channel is the channel; must be "sms".
+	Channel string
+	// EndpointValue is the agent's number: 10 to 15 digits, country code included, no "+".
+	EndpointValue string
+	// ContactIdentifier is the contact's number: 10 to 15 digits, country code included,
+	// no "+".
+	ContactIdentifier string
+}
+
+// ResumeAgentConversation resumes an agent on a paused conversation, so it answers the
+// contact's next text again, and returns the removed pause.
+// Roles: api, admin, developer, billing, user.
+// DELETE /agent/pauses/{channel}/{endpointValue}/{contactIdentifier}
+func (s *AgentsService) ResumeAgentConversation(ctx context.Context, params ResumeAgentConversationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"channel": params.Channel, "endpointValue": params.EndpointValue, "contactIdentifier": params.ContactIdentifier}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/agent/pauses/%s/%s/%s", url.PathEscape(params.Channel), url.PathEscape(params.EndpointValue), url.PathEscape(params.ContactIdentifier))
+	return s.client.doJSON(ctx, "DELETE", path, nil, opts)
+}
+
 // GetAgentReplyDraftsParams are the parameters for GetAgentReplyDrafts.
 type GetAgentReplyDraftsParams struct {
 	// GroupID is the group whose drafts to list. Required.

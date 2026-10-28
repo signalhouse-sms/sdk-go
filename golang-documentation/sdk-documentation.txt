@@ -153,42 +153,59 @@ BRANDS  (client.Brands)
       *RequestOptions) (*Response, error)
     Create a new 10DLC brand.
 
-  GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID,
+  GetBusinessVerifications(ctx, GetBusinessVerificationsParams{GroupID,
       SubgroupID}, *RequestOptions) (*Response, error)
-    Get a group's business verification: whether its toll-free brands need
-    one, its status and the submitted details.
+    List a group's business verifications, newest first, and whether its
+    toll-free brands need one.
     Sends a GET to /brand/business-verification/:groupId, with SubgroupID as
     the subgroupId query parameter only when it is set.
     SubgroupID (string, optional): some groups verify each subgroup's
     business separately: a platform whose subgroups are separate businesses,
     set up by Signal House. For those groups SubgroupID is required, and it
-    names the subgroup whose business verification to read. Any other group
-    has one business verification for all its subgroups; a SubgroupID sent
-    for it must still be one of the group's subgroups.
-    Returns 200: { groupId, subgroupId, required, status, details,
-    submittedAt, reviewedAt, rejectionReason }. subgroupId is present only
-    when the business verification belongs to one subgroup. required says
-    whether the group's new toll-free brands need one; status is
-    NOT_STARTED, SUBMITTING, IN_REVIEW, VERIFIED or NEEDS_CHANGES;
-    rejectionReason says why it needs changes, or is null.
+    names the subgroup whose business verifications to list. Any other
+    group's business verifications cover all its subgroups; a SubgroupID
+    sent for it must still be one of the group's subgroups.
+    Returns 200: { groupId, subgroupId, required, businessVerifications }.
+    subgroupId is present only when the business verifications belong to
+    one subgroup. required says whether the group's new toll-free brands
+    need one. Each business verification is { businessVerificationId,
+    groupId, subgroupId, status, details, submittedAt, reviewedAt,
+    rejectionReason }, with subgroupId only when set; status is SUBMITTING,
+    IN_REVIEW, VERIFIED or NEEDS_CHANGES; rejectionReason says why it needs
+    changes, or is null.
     Errors: 400 when the group verifies each subgroup's business separately
     and SubgroupID is missing; 404 when the subgroup isn't in the group.
 
-  SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{GroupID,
+  GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID,
+      BusinessVerificationID}, *RequestOptions) (*Response, error)
+    Get one of a group's business verifications by its ID.
+    Sends a GET to /brand/business-verification/:groupId/:businessVerificationId.
+    Returns 200: the business verification, as GetBusinessVerifications
+    lists it, plus required.
+    Errors: 404 when it isn't one of the group's.
+
+  CreateBusinessVerification(ctx, CreateBusinessVerificationParams{GroupID,
       SubgroupID, Details}, *RequestOptions) (*Response, error)
-    Submit or update a group's business verification. Allowed when it is not
-    started or needs changes. Review usually takes 1–2 business days; the
-    group's toll-free brands stay pending until it is verified.
-    Sends a PUT to /brand/business-verification/:groupId with Details as the
-    body, and SubgroupID as the subgroupId query parameter only when it is
-    set.
+    Create and submit a new business verification. Review usually takes 1–2
+    business days.
+    Sends a POST to /brand/business-verification/:groupId with Details as
+    the body, and SubgroupID as the subgroupId query parameter only when it
+    is set.
     SubgroupID (string, optional): some groups verify each subgroup's
     business separately: a platform whose subgroups are separate businesses,
     set up by Signal House. For those groups SubgroupID is required, and it
     names the subgroup whose business this verifies; only that subgroup's
-    toll-free brands wait on it. Any other group has one business
-    verification for all its subgroups; a SubgroupID sent for it must still
-    be one of the group's subgroups. Either way the subgroup must be active.
+    toll-free brands can use it. Any other group's business verifications
+    cover all its subgroups; a SubgroupID sent for it must still be one of
+    the group's subgroups. Either way the subgroup must be active.
+    Once it is VERIFIED, a new toll-free brand uses it by setting
+    TollFree.BusinessVerificationID in CreateTollFreeBrand. The brand's
+    legal fields (CompanyName, Street, City, State, PostalCode, Country,
+    FirstName, LastName and TollFree's BusinessRegistrationType, TaxID,
+    CountryCode and TaxIDIssuingCountry) may then be left empty: they come
+    from the business verification. A group whose toll-free brands need a
+    business verification must set it; any other group gets 400 if it does.
+    It can't be changed after the brand is created.
     Details (map[string]any): businessName, businessType, industry,
     registrationType, registrationNumber, website, street, street2
     (optional), city, state (2-letter code), postalCode, country ("US" or
@@ -207,13 +224,23 @@ BRANDS  (client.Brands)
     BRN, SIREN, SIRET, NZBN, UST_IDNR, CIF, NIF, CNPJ, UID, OTHER.
     representative.jobLevel: DIRECTOR, GM, VP, CEO, CFO, GENERAL_COUNSEL,
     OTHER.
-    Returns 202: { groupId, subgroupId, required, status, details,
-    submittedAt, reviewedAt, rejectionReason }, with status SUBMITTING.
-    subgroupId is present only when the business verification belongs to
-    one subgroup.
-    Errors: 400 when the group verifies each subgroup's business separately
-    and SubgroupID is missing, or when the subgroup isn't active; 404 when
-    the subgroup isn't in the group.
+    Returns 202: the business verification, as GetBusinessVerifications
+    lists it, with status SUBMITTING.
+    Errors: 400 when the group's toll-free brands don't need a business
+    verification, when the group verifies each subgroup's business
+    separately and SubgroupID is missing, or when the subgroup isn't active;
+    404 when the subgroup isn't in the group.
+
+  UpdateBusinessVerification(ctx, UpdateBusinessVerificationParams{GroupID,
+      BusinessVerificationID, Details}, *RequestOptions) (*Response, error)
+    Correct and resubmit a business verification. Allowed only while it
+    needs changes. Review usually takes 1–2 business days; the toll-free
+    brands that use it stay pending until it is verified.
+    Sends a PUT to /brand/business-verification/:groupId/:businessVerificationId
+    with Details (as for CreateBusinessVerification) as the body.
+    Returns 202: the business verification, with status SUBMITTING.
+    Errors: 400 when it doesn't need changes; 404 when it isn't one of the
+    group's.
 
   UpdateBrand(ctx, UpdateBrandParams{BrandID, BrandData},
       *RequestOptions) (*Response, error)
