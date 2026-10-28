@@ -1,0 +1,1022 @@
+================================================================================
+                    SIGNALHOUSE GO SDK DOCUMENTATION
+================================================================================
+
+INSTALLATION
+--------------------------------------------------------------------------------
+  go get github.com/signalhouse-sms/sdk-go/signalhouse
+
+
+INITIALIZATION
+--------------------------------------------------------------------------------
+  import "github.com/signalhouse-sms/sdk-go/signalhouse"
+
+  client, err := signalhouse.NewClient(signalhouse.Config{
+      APIKey:  "your-api-token",
+      BaseURL: "https://v2.signalhouse.io",
+  })
+  if err != nil {
+      log.Fatal(err)
+  }
+
+  Required options:
+    - APIKey   (string)  JWT token or service user token for authentication
+    - BaseURL  (string)  API base URL
+
+  NewClient returns an error if APIKey or BaseURL is missing.
+
+
+PER-REQUEST TOKEN OVERRIDE
+--------------------------------------------------------------------------------
+  Every SDK method accepts an optional *RequestOptions parameter to override
+  the default APIKey for that single request.
+
+  Example:
+    resp, err := client.Messages.GetMessages(ctx, signalhouse.GetMessagesParams{
+        Page:  "1",
+        Limit: "10",
+    }, &signalhouse.RequestOptions{Token: "user-specific-jwt-token"})
+
+  The per-request token takes precedence over the APIKey provided at
+  initialization. The original APIKey remains unchanged.
+
+
+CUSTOM HEADERS
+--------------------------------------------------------------------------------
+  Pass additional headers via the RequestOptions.Headers field:
+
+  Example:
+    resp, err := client.Numbers.GetPhoneNumbers(ctx, signalhouse.GetPhoneNumbersParams{
+        Page:  "1",
+        Limit: "20",
+    }, &signalhouse.RequestOptions{
+        Headers: map[string]string{
+            "X-Request-Id": "req_abc123",
+        },
+    })
+
+
+IDEMPOTENT REQUESTS
+--------------------------------------------------------------------------------
+  Set RequestOptions.IdempotencyKey to make a create, update or delete safe to
+  retry. The SDK sends it as the Idempotency-Key header. A retry with the same
+  key and the same request replays the first response, marked with the
+  response header Idempotent-Replayed: true, instead of running the request
+  again.
+
+  - Use a new key (a UUID is recommended) for each new operation, and reuse
+    it only to retry that exact request.
+  - Keys are scoped to the authenticated user and kept for 24 hours.
+  - Reusing a key for a different request returns 422; retrying while the
+    first request is still running returns 409 with Retry-After.
+  - The SDK never creates a key for you. GET requests ignore it, and the
+    Voice service does not support it.
+  - net/http also resends a keyed request on a dropped connection; the API
+    replays it rather than running it twice.
+
+  Example:
+    resp, err := client.Subgroups.CreateSubgroup(ctx, signalhouse.CreateSubgroupParams{
+        SubgroupData: signalhouse.CreateSubgroupData{GroupID: "G0000001", SubgroupName: "Support"},
+    }, &signalhouse.RequestOptions{
+        IdempotencyKey: "6f1c2a4e-8b3d-4c5e-9f70-1a2b3c4d5e6f", // a UUID you generate
+    })
+
+
+================================================================================
+                          DOMAIN METHOD REFERENCE
+================================================================================
+
+AUTH  (client.Auth)
+--------------------------------------------------------------------------------
+  Login(ctx, LoginParams{Email, Password}, *RequestOptions) (*Response, error)
+    Login with email and password.
+
+  ResetPassword(ctx, ResetPasswordParams{UserID, NewPassword},
+      *RequestOptions) (*Response, error)
+    Reset a user's password.
+
+  GetAuthHistory(ctx, GetAuthHistoryParams{GroupID, UserID, Page, Limit},
+      *RequestOptions) (*Response, error)
+    Get token login history.
+
+
+BILLING  (client.Billing)
+--------------------------------------------------------------------------------
+  GetTransactionHistory(ctx, GetTransactionHistoryParams{GroupID, SubgroupID,
+      BrandID, CampaignID, EntryType, TransactionType, StartDate, EndDate},
+      *RequestOptions) (*Response, error)
+    Get transaction history with filters.
+
+  GetWallet(ctx, GetWalletParams{GroupID},
+      *RequestOptions) (*Response, error)
+    Get wallet balance and settings.
+
+  UpdateWallet(ctx, UpdateWalletParams{GroupID, AutoRechargeEnabled,
+      AutoRechargeThreshold, AutoRechargeToAmount, PrimaryPaymentMethodID,
+      SecondaryPaymentMethodID}, *RequestOptions) (*Response, error)
+    Update wallet auto-recharge settings.
+
+  GetPaymentMethods(ctx, GetPaymentMethodsParams{GroupID},
+      *RequestOptions) (*Response, error)
+    List saved payment methods.
+
+  AddFunds(ctx, AddFundsParams{GroupID, Amount, PaymentMethodID},
+      *RequestOptions) (*Response, error)
+    Add funds to wallet. Amount is in microdollars (1,000,000 = $1.00).
+
+  AddPaymentMethod(ctx, AddPaymentMethodParams{GroupID, PaymentMethodID},
+      *RequestOptions) (*Response, error)
+    Save a new payment method.
+
+  RemovePaymentMethod(ctx, RemovePaymentMethodParams{GroupID,
+      PaymentMethodID}, *RequestOptions) (*Response, error)
+    Remove a saved payment method.
+
+  GetInvoiceDetails(ctx, GetInvoiceDetailsParams{GroupID, SubgroupID,
+      StartDate, EndDate}, *RequestOptions) (*Response, error)
+    Get invoice/billing details.
+
+  GetFees(ctx, GetFeesParams{GroupID},
+      *RequestOptions) (*Response, error)
+    Get fee schedule for the group.
+
+
+BRANDS  (client.Brands)
+--------------------------------------------------------------------------------
+  GetBrands(ctx, GetBrandsParams{ID, SubgroupID, GroupID, Page, Limit,
+      Status, CurrentTollFreeCarrier}, *RequestOptions) (*Response, error)
+    List brands with filters.
+    CurrentTollFreeCarrier (*bool): with GroupID or SubgroupID, true returns
+    only the toll-free brands a new toll-free campaign in that group can use.
+
+  CreateBrand(ctx, CreateBrandParams{BrandData},
+      *RequestOptions) (*Response, error)
+    Create a new 10DLC brand.
+
+  GetBusinessVerification(ctx, GetBusinessVerificationParams{GroupID,
+      SubgroupID}, *RequestOptions) (*Response, error)
+    Get a group's business verification: whether its toll-free brands need
+    one, its status and the submitted details.
+    Sends a GET to /brand/business-verification/:groupId, with SubgroupID as
+    the subgroupId query parameter only when it is set.
+    SubgroupID (string, optional): some groups verify each subgroup's
+    business separately: a platform whose subgroups are separate businesses,
+    set up by Signal House. For those groups SubgroupID is required, and it
+    names the subgroup whose business verification to read. Any other group
+    has one business verification for all its subgroups; a SubgroupID sent
+    for it must still be one of the group's subgroups.
+    Returns 200: { groupId, subgroupId, required, status, details,
+    submittedAt, reviewedAt, rejectionReason }. subgroupId is present only
+    when the business verification belongs to one subgroup. required says
+    whether the group's new toll-free brands need one; status is
+    NOT_STARTED, SUBMITTING, IN_REVIEW, VERIFIED or NEEDS_CHANGES;
+    rejectionReason says why it needs changes, or is null.
+    Errors: 400 when the group verifies each subgroup's business separately
+    and SubgroupID is missing; 404 when the subgroup isn't in the group.
+
+  SubmitBusinessVerification(ctx, SubmitBusinessVerificationParams{GroupID,
+      SubgroupID, Details}, *RequestOptions) (*Response, error)
+    Submit or update a group's business verification. Allowed when it is not
+    started or needs changes. Review usually takes 1–2 business days; the
+    group's toll-free brands stay pending until it is verified.
+    Sends a PUT to /brand/business-verification/:groupId with Details as the
+    body, and SubgroupID as the subgroupId query parameter only when it is
+    set.
+    SubgroupID (string, optional): some groups verify each subgroup's
+    business separately: a platform whose subgroups are separate businesses,
+    set up by Signal House. For those groups SubgroupID is required, and it
+    names the subgroup whose business this verifies; only that subgroup's
+    toll-free brands wait on it. Any other group has one business
+    verification for all its subgroups; a SubgroupID sent for it must still
+    be one of the group's subgroups. Either way the subgroup must be active.
+    Details (map[string]any): businessName, businessType, industry,
+    registrationType, registrationNumber, website, street, street2
+    (optional), city, state (2-letter code), postalCode, country ("US" or
+    "CA") and representative (firstName, lastName, email, phone in E.164,
+    jobTitle, jobLevel).
+    businessType: CO_OPERATIVE, CORPORATION, LIMITED_LIABILITY_CORPORATION,
+    NON_PROFIT_CORPORATION, PARTNERSHIP.
+    industry: AGRICULTURE, AUTOMOTIVE, BANKING, CONSTRUCTION, CONSUMER,
+    EDUCATION, ELECTRONICS, ENGINEERING, ENERGY, FAST_MOVING_CONSUMER_GOODS,
+    FINANCIAL, FINTECH, FOOD_AND_BEVERAGE, GOVERNMENT, HEALTHCARE,
+    HOSPITALITY, INSURANCE, JEWELRY, LEGAL, MANUFACTURING, MEDIA,
+    NOT_FOR_PROFIT, OIL_AND_GAS, ONLINE, PROFESSIONAL_SERVICES, RAW_MATERIALS,
+    REAL_ESTATE, RELIGION, RETAIL, TECHNOLOGY, TELECOMMUNICATIONS,
+    TRANSPORTATION, TRAVEL.
+    registrationType: EIN, CBN, NEQ, PROVINCIAL_NUMBER, CRN, VAT, ACN, ABN,
+    BRN, SIREN, SIRET, NZBN, UST_IDNR, CIF, NIF, CNPJ, UID, OTHER.
+    representative.jobLevel: DIRECTOR, GM, VP, CEO, CFO, GENERAL_COUNSEL,
+    OTHER.
+    Returns 202: { groupId, subgroupId, required, status, details,
+    submittedAt, reviewedAt, rejectionReason }, with status SUBMITTING.
+    subgroupId is present only when the business verification belongs to
+    one subgroup.
+    Errors: 400 when the group verifies each subgroup's business separately
+    and SubgroupID is missing, or when the subgroup isn't active; 404 when
+    the subgroup isn't in the group.
+
+  UpdateBrand(ctx, UpdateBrandParams{BrandID, BrandData},
+      *RequestOptions) (*Response, error)
+    Update brand information.
+
+  DeleteBrand(ctx, DeleteBrandParams{BrandID},
+      *RequestOptions) (*Response, error)
+    Delete (soft) a brand.
+
+  TransferBrand(ctx, TransferBrandParams{SubgroupID, BrandIDs},
+      *RequestOptions) (*Response, error)
+    Transfer brands to a different subgroup.
+
+  GetExternalVetting(ctx, GetExternalVettingParams{BrandID},
+      *RequestOptions) (*Response, error)
+    Get external vetting info for a brand.
+
+  CreateExternalVetting(ctx, CreateExternalVettingParams{BrandID},
+      *RequestOptions) (*Response, error)
+    Submit brand for external vetting.
+
+  ImportExternalVetting(ctx, ImportExternalVettingParams{BrandID,
+      VettingProviderID, VettingID, VettingToken}, *RequestOptions) (*Response, error)
+    Import an existing external vetting record (not billable).
+
+  RevetBrand(ctx, RevetBrandParams{BrandID},
+      *RequestOptions) (*Response, error)
+    Resubmit brand for vetting.
+
+  GetAppealHistory(ctx, GetAppealHistoryParams{BrandID},
+      *RequestOptions) (*Response, error)
+    List identity status appeals for a brand.
+
+  SubmitAppeal(ctx, SubmitAppealParams{BrandID, AppealCategories,
+      Explanation, File}, *RequestOptions) (*Response, error)
+    Submit a brand identity status appeal with supporting documentation.
+    Uses multipart/form-data automatically.
+    AppealCategories: []string (VERIFY_TAX_ID, VERIFY_NON_PROFIT, VERIFY_GOVERNMENT)
+    Explanation: string (max 1024 chars)
+    File: io.Reader (supported: .jpg, .jpeg, .png, .bmp, .raw, .tiff, .pdf, .docx, .htm, .odt, .rtf, .txt, .xml)
+
+
+CAMPAIGNS  (client.Campaigns)
+--------------------------------------------------------------------------------
+  GetCampaigns(ctx, GetCampaignsParams{ID, BrandID, SubgroupID, GroupID,
+      Page, Limit, Status}, *RequestOptions) (*Response, error)
+    List campaigns with filters.
+
+  CreateCampaign(ctx, CreateCampaignParams{CampaignData},
+      *RequestOptions) (*Response, error)
+    Create a new 10DLC campaign.
+
+  UpdateCampaign(ctx, UpdateCampaignParams{CampaignID, CampaignData},
+      *RequestOptions) (*Response, error)
+    Update campaign details.
+
+  DeleteCampaign(ctx, DeleteCampaignParams{CampaignID},
+      *RequestOptions) (*Response, error)
+    Delete (soft) a campaign.
+
+  AppealDcaRejection(ctx, AppealDcaRejectionParams{CampaignID, Reason},
+      *RequestOptions) (*Response, error)
+    Appeal a DCA-rejected campaign. The campaign must be in DCA_REJECTED status.
+    Sends a POST to /campaign/appealDcaRejection/:campaignId.
+    Reason: string (max 2048 chars)
+    Returns 202: { Message: "Campaign DCA appeal has been queued for processing" }
+
+  NudgeDcaForCampaign(ctx, NudgeDcaForCampaignParams{CampaignID},
+      *RequestOptions) (*Response, error)
+    Nudge a connectivity partner to prioritize review of a campaign in PENDING_DCA_APPROVAL status.
+    Sends a POST to /campaign/nudge/:campaignId.
+    No request body required.
+    Returns 200: { message: "Nudge successful" }
+
+
+GROUPS  (client.Groups)
+--------------------------------------------------------------------------------
+  GetGroup(ctx, GetGroupParams{ID},
+      *RequestOptions) (*Response, error)
+    Get group details by ID.
+
+  UpdateGroup(ctx, UpdateGroupParams{ID, GroupData},
+      *RequestOptions) (*Response, error)
+    Update group information.
+
+
+LANDINGS  (client.Landings)
+--------------------------------------------------------------------------------
+  GetLandings(ctx, GetLandingsParams{LandingID},
+      *RequestOptions) (*Response, error)
+    Get a landing page by ID.
+
+  GetLandingByBrandID(ctx, GetLandingByBrandIDParams{BrandID},
+      *RequestOptions) (*Response, error)
+    Get landing page associated with a brand.
+
+  CreateLanding(ctx, CreateLandingParams{LandingData, File},
+      *RequestOptions) (*Response, error)
+    Create a landing page with optional image upload.
+    Uses multipart/form-data automatically.
+
+  UpdateLanding(ctx, UpdateLandingParams{LandingID, LandingData, File},
+      *RequestOptions) (*Response, error)
+    Update a landing page with optional image upload.
+    Uses multipart/form-data automatically.
+
+  DeleteLanding(ctx, DeleteLandingParams{LandingID},
+      *RequestOptions) (*Response, error)
+    Delete a landing page.
+
+
+MESSAGES  (client.Messages)
+--------------------------------------------------------------------------------
+  GetMessages(ctx, GetMessagesParams{ID, CampaignID, BrandID, SubgroupID,
+      GroupID, Status, Direction, MessageType, Carrier, SentimentLabel,
+      ErrorCode, StartDate, EndDate, SortField, SortOrder, Page, Limit},
+      *RequestOptions) (*Response, error)
+    List messages with extensive filters.
+
+  GetAnalytics(ctx, GetAnalyticsParams{GroupID, SubgroupID, BrandID,
+      CampaignID, RegistrationID, PhoneNumber, Carrier, StartDate, EndDate},
+      *RequestOptions) (*Response, error)
+    Get aggregated message analytics.
+
+  SendSMS(ctx, SendSMSParams{SenderPhoneNumber, RecipientPhoneNumbers,
+      MessageBody, StatusCallbackURL, EnableShortlink},
+      *RequestOptions) (*Response, error)
+    Send an SMS message.
+    Required: SenderPhoneNumber, RecipientPhoneNumbers, MessageBody
+
+  SendMMS(ctx, SendMMSParams{SenderPhoneNumber, RecipientPhoneNumbers,
+      MessageBody, MediaURLs, StatusCallbackURL, EnableShortlink,
+      EnableCompression, Images},
+      *RequestOptions) (*Response, error)
+    Send an MMS message with media attachments.
+    Uses multipart/form-data automatically.
+    Required: SenderPhoneNumber, RecipientPhoneNumbers, MessageBody
+
+  SendGroupMessage(ctx, SendGroupMessageParams{SenderPhoneNumber,
+      RecipientPhoneNumbers, MessageBody, MediaURLs, StatusCallbackURL,
+      EnableShortlink, EnableCompression, Images},
+      *RequestOptions) (*Response, error)
+    Send a group MMS message.
+    Uses multipart/form-data automatically.
+    Required: SenderPhoneNumber, RecipientPhoneNumbers, MessageBody
+
+  CarrierIdLookup(ctx, CarrierIdLookupParams{PhoneNumber}, opts)
+    Look up the carrier for a phone number.
+    Always performs a fresh lookup (not cached). Billed per request.
+    Required: PhoneNumber (10+ digits, no + prefix)
+    Returns: { phoneNumber, carrier, carrierFamily, carrierRegion, ported, type, degradedConfidence, cost }
+
+
+TEMPLATES  (client.Templates)
+--------------------------------------------------------------------------------
+  Versioned templates on /template. Every route is 404 while the API's
+  RCS switch is off.
+  Every call takes GroupID (query on reads, body on JSON writes, form field on
+  upload). Body fields are the raw RcsTemplateBody ({channel: "rcs",
+  contentFormat: "rcs.blocks.v1", content: {blocks}, variables, defaults,
+  fallback}), typed any (json.RawMessage or map[string]any) and sent verbatim.
+  Writes honor RequestOptions.IdempotencyKey and apply directly (last write
+  wins). 409 codes are TEMPLATE_ARCHIVED, TEMPLATE_NAME_TAKEN, NO_DRAFT
+  (publish with no draft) and DRAFT_CHANGED (publish only: the draft changed
+  while it was being published; publish again).
+
+  Create(ctx, CreateTemplateParams{GroupID, Name, Tag,
+      Body}, *RequestOptions) (*Response, error)
+    POST /template. Creates draft version 1; returns 201 {head, version}.
+
+  List(ctx, GetTemplatesParams{GroupID, State, Channel,
+      Tag, Search, SortBy, SortOrder, Page, Limit},
+      *RequestOptions) (*Response, error)
+    GET /template. State DRAFT|PUBLISHED|ARCHIVED, SortBy
+    name|createdAt|updatedAt; Limit default 25, max 100. Returns
+    {data, total, page, limit} of summaries (head + state, hasUnpublishedChanges).
+
+  Get(ctx, GetTemplateParams{TemplateID, GroupID, Version},
+      *RequestOptions) (*Response, error)
+    GET /template/:templateId. Version is a positive integer, "draft" or
+    "published"; empty returns the published version, else the draft. An
+    explicit version never falls back (404).
+
+  Update(ctx, UpdateTemplateParams{TemplateID, GroupID, Name, Tag,
+      ClearTag, Body}, *RequestOptions) (*Response, error)
+    PUT /template/:templateId. Edits the draft, creating one from the
+    published version if needed. Name empty is omitted. Tag nil leaves it
+    unchanged; ClearTag sends null. Body is a full replacement.
+
+  Publish(ctx, PublishTemplateParams{TemplateID, GroupID},
+      *RequestOptions) (*Response, error)
+    POST /template/:templateId/publish. Publishes the current draft.
+    An incomplete draft is 400 {code: "TEMPLATE_INVALID", errors, warnings};
+    no draft is 409 {code: "NO_DRAFT"}; a draft that changed while it was
+    being published is 409 {code: "DRAFT_CHANGED"} (publish again).
+
+  Archive(ctx, ArchiveTemplateParams{TemplateID, GroupID},
+      *RequestOptions) (*Response, error)
+    POST /template/:templateId/archive. Returns the head.
+
+  Versions(ctx, GetVersionsParams{TemplateID, GroupID, Page, Limit},
+      *RequestOptions) (*Response, error)
+    GET /template/:templateId/versions. Version summaries, no bodies.
+
+  Validate(ctx, ValidateTemplateParams{TemplateID, GroupID, Body,
+      Version}, *RequestOptions) (*Response, error)
+    POST /template/:templateId/validate. Set exactly one of Body or
+    Version (a numeric Version is sent as a number). Writes nothing; returns
+    {valid, contentHash, validatorVersion, errors, warnings}.
+
+  Capabilities(ctx, GetCapabilitiesParams{GroupID, Channel, Provider},
+      *RequestOptions) (*Response, error)
+    GET /template/capabilities. Channel defaults to "rcs"; Provider
+    infobip|sinch adds provider limits and unsupported features.
+
+  UploadMedia(ctx, UploadMediaParams{GroupID, File}, *RequestOptions)
+      (*Response, error)
+    POST /template/media, multipart fields file + groupId. Returns 201
+    {mediaId, groupId, url, bytes, mimeType, kind, width, height, createdAt}.
+
+
+NOTIFICATIONS  (client.Notifications)
+--------------------------------------------------------------------------------
+  GetNotifications(ctx, GetNotificationsParams{ID, GroupID, Page, Limit,
+      Status, EventTypes}, *RequestOptions) (*Response, error)
+    Get notifications with filters.
+
+  UpdateNotificationStatus(ctx, UpdateNotificationStatusParams{IDs, Status},
+      *RequestOptions) (*Response, error)
+    Mark notifications as READ or UNREAD.
+
+  DeleteNotification(ctx, DeleteNotificationParams{ID},
+      *RequestOptions) (*Response, error)
+    Delete a notification.
+
+
+NUMBERS  (client.Numbers)
+--------------------------------------------------------------------------------
+  GetPhoneNumbers(ctx, GetPhoneNumbersParams{PhoneNumber, CampaignID,
+      RegistrationID, BrandID, SubgroupID, GroupID, Page, Limit,
+      CurrentTollFreeCarrier}, *RequestOptions) (*Response, error)
+    List your phone numbers with filters.
+    RegistrationID: filter to numbers provisioned under this registration.
+    CurrentTollFreeCarrier (*bool): with GroupID or SubgroupID, true returns
+    only the toll-free numbers a new toll-free campaign in that group can use.
+
+  GetNumberHealth(ctx, phoneNumber, *RequestOptions) (*Response, error)
+    Get the health score, the same one the portal shows, (1–10) for an owned phone number.
+    Returns sevenDay and thirtyDay breakdowns matching the portal.
+
+  GetAvailablePhoneNumbers(ctx, GetAvailablePhoneNumbersParams{SMSEnabled,
+      MMSEnabled, VoiceEnabled, Country, State, NPA, NXX, PhoneNumber,
+      Limit, Page}, *RequestOptions) (*Response, error)
+    Search available numbers for purchase.
+
+  PurchasePhoneNumber(ctx, PurchasePhoneNumberParams{PhoneNumbers,
+      SubgroupID}, *RequestOptions) (*Response, error)
+    Purchase one or more phone numbers.
+
+  UpdatePhoneNumber(ctx, UpdatePhoneNumberParams{PhoneNumber, UpdateData},
+      *RequestOptions) (*Response, error)
+    Update phone number details (e.g., friendly name).
+
+  GetCallerName(ctx, GetCallerNameParams{PhoneNumber},
+      *RequestOptions) (*Response, error)
+    Read a number's caller name (CNAM): { phoneNumber, cnam, autoApply,
+    eligible, ineligibleReason }. Roles: api, admin, developer, billing, user.
+
+  SetCallerName(ctx, SetCallerNameParams{PhoneNumber, Name, BrandID},
+      *RequestOptions) (*Response, error)
+    Set a number's caller name (CNAM). BrandID is optional (numbers with no
+    campaign only). Roles: api, admin, developer.
+
+  DeleteCallerName(ctx, DeleteCallerNameParams{PhoneNumber},
+      *RequestOptions) (*Response, error)
+    Remove a number's own caller name (CNAM). Roles: api, admin, developer.
+
+  AssignPhoneNumberToCampaign(ctx, AssignPhoneNumberToCampaignParams{
+      CampaignID, PhoneNumbers}, *RequestOptions) (*Response, error)
+    Assign numbers to a campaign.
+
+  UnassignPhoneNumbersFromCampaigns(ctx,
+      UnassignPhoneNumbersFromCampaignsParams{PhoneNumbers},
+      *RequestOptions) (*Response, error)
+    Unassign numbers from their campaigns.
+
+  DeletePhoneNumbers(ctx, DeletePhoneNumbersParams{PhoneNumbers},
+      *RequestOptions) (*Response, error)
+    Release phone numbers.
+
+  TransferPhoneNumbers(ctx, TransferPhoneNumbersParams{PhoneNumbers,
+      NewSubgroupID}, *RequestOptions) (*Response, error)
+    Transfer unassigned numbers between subgroups.
+
+  SearchNpaNxx(ctx, SearchNpaNxxParams{Country, State, City, NPA, NXX},
+      *RequestOptions) (*Response, error)
+    Search NPA/NXX area code lookup data.
+
+  LookupLocations(ctx, LookupLocationsParams{Entries},
+      *RequestOptions) (*Response, error)
+    Batch lookup city/state for NPA/NXX pairs.
+    Entries: []NpaNxxEntry{{NPA: "213", NXX: "555"}, ...}
+
+  PortInPhoneNumber(ctx, PortInPhoneNumberParams{NumberData},
+      *RequestOptions) (*Response, error)
+    Submit a port-in request (POST /number/portin).
+    NumberData: map[string]interface{} containing port-in request data (required).
+
+  GetPortRequests(ctx, GetPortRequestsParams{GroupID, PhoneNumber,
+      Status, Page, Limit, ExcludeDocuments}, *RequestOptions) (*Response, error)
+    Get port-in requests with optional filters (GET /number/portin).
+    All parameters are optional. ExcludeDocuments "true" leaves signatureUrl
+    and billingUrl out of each request.
+
+
+SHORTLINKS  (client.Shortlinks)
+--------------------------------------------------------------------------------
+  GetShortlink(ctx, GetShortlinkParams{ShortlinkID, MessageID, PhoneNumber,
+      CampaignID, BrandID, SubgroupID, GroupID, Page, Limit},
+      *RequestOptions) (*Response, error)
+    Get shortlink details and click data.
+
+  GetShortlinkRedirect(ctx, GetShortlinkRedirectParams{ShortlinkID},
+      *RequestOptions) (*Response, error)
+    Get the redirect URL for a shortlink.
+
+  GetOptOut(ctx, OptOutParams{Code}, *RequestOptions) (*Response, error)
+    Public, no auth. GET /shortlink/optout/:code for the alphanumeric-sender
+    opt-out link (sihou.io/o/{code}): { code, senderName, maskedRecipient,
+    optedOut }; 404 for an unknown code.
+
+  ConfirmOptOut(ctx, OptOutParams{Code}, *RequestOptions) (*Response, error)
+    Public, no auth. POST /shortlink/optout/:code (no body) opts the recipient
+    out; idempotent. Returns { code, senderName, maskedRecipient, optedOut: true };
+    404 for an unknown code.
+
+
+SUBGROUPS  (client.Subgroups)
+--------------------------------------------------------------------------------
+  GetSubgroups(ctx, GetSubgroupsParams{ID, GroupID, Page, Limit},
+      *RequestOptions) (*Response, error)
+    List subgroups with filters.
+
+  CreateSubgroup(ctx, CreateSubgroupParams{SubgroupData},
+      *RequestOptions) (*Response, error)
+    Create a new subgroup.
+    CreateSubgroupData includes optional CarrierIDFamily and CarrierIDRegion.
+    Setting CarrierIDFamily or CarrierIDRegion requires signalhouse_api,
+    signalhouse_admin, signalhouse_user, api, admin, developer, or billing role.
+
+  UpdateSubgroup(ctx, UpdateSubgroupParams{ID, UpdateData},
+      *RequestOptions) (*Response, error)
+    Update subgroup details.
+    UpdateSubgroupData includes optional CarrierIDFamily and CarrierIDRegion.
+    Setting CarrierIDFamily or CarrierIDRegion requires signalhouse_api,
+    signalhouse_admin, signalhouse_user, api, admin, developer, or billing role.
+    UpdateSubgroupData also includes optional CnamAutoApply (*bool) and
+    CnamBrandID (*string); set ClearCnamBrandID to send cnamBrandId as null.
+
+  DeleteSubgroup(ctx, DeleteSubgroupParams{ID},
+      *RequestOptions) (*Response, error)
+    Delete (deactivate) a subgroup.
+
+
+SUBSCRIPTIONS  (client.Subscriptions)
+--------------------------------------------------------------------------------
+  GetSubscriptions(ctx, GetSubscriptionsParams{GroupID, OnlyActive},
+      *RequestOptions) (*Response, error)
+    Get subscription history for a group.
+
+  Subscribe(ctx, SubscribeParams{GroupID, TemplateID},
+      *RequestOptions) (*Response, error)
+    Subscribe a group to a plan.
+
+  Unsubscribe(ctx, UnsubscribeParams{GroupID},
+      *RequestOptions) (*Response, error)
+    Unsubscribe a group from their current plan.
+
+
+USERS  (client.Users)
+--------------------------------------------------------------------------------
+  GetUsers(ctx, GetUsersParams{ID, GroupID, UserType},
+      *RequestOptions) (*Response, error)
+    List users with filters.
+
+  CreateUser(ctx, CreateUserParams{Data},
+      *RequestOptions) (*Response, error)
+    Create a new user.
+
+  CreateServiceUser(ctx, CreateServiceUserParams{Data},
+      *RequestOptions) (*Response, error)
+    Create a service user (API key). Optional allowedIps (IPs/CIDRs) and
+    allowedCountries (ISO 3166-1 alpha-2) restrict where a customer key is accepted from.
+    allowedDestinationCountries (ISO 3166-1 alpha-2) limits the countries it can send
+    messages to; a send to any other country is rejected with 403 DESTINATION_COUNTRY_NOT_ALLOWED.
+
+  UpdateUser(ctx, UpdateUserParams{ID, Data},
+      *RequestOptions) (*Response, error)
+    Update user information. For a customer API key, allowedIps / allowedCountries /
+    allowedDestinationCountries replace its restrictions ([] removes one); needs an interactive admin/developer session.
+
+  DeleteUser(ctx, DeleteUserParams{ID},
+      *RequestOptions) (*Response, error)
+    Delete (deactivate) a user.
+
+  GetNotificationPreferences(ctx,
+      GetNotificationPreferencesParams{ID},
+      *RequestOptions) (*Response, error)
+    Get user notification preferences.
+
+  UpdateNotificationPreferences(ctx,
+      UpdateNotificationPreferencesParams{ID, NotificationPreferences},
+      *RequestOptions) (*Response, error)
+    Update notification preferences.
+
+
+WEBHOOKS  (client.Webhooks)
+--------------------------------------------------------------------------------
+  GetWebhooks(ctx, GetWebhooksParams{ID, GroupID, EndpointType, PhoneNumber,
+      Page, Limit}, *RequestOptions) (*Response, error)
+    List webhooks with filters.
+
+  CreateWebhook(ctx, CreateWebhookParams{WebhookData},
+      *RequestOptions) (*Response, error)
+    Create a new webhook.
+
+  UpdateWebhook(ctx, UpdateWebhookParams{ID, UpdateData},
+      *RequestOptions) (*Response, error)
+    Update webhook configuration, including authType, apiHeaderPrefix and credentials
+    (changed in place). Responses carry hasSigningSecret/hasCredentials, never secrets.
+
+  RotateWebhookSecret(ctx, RotateWebhookSecretParams{ID, GraceSeconds},
+      *RequestOptions) (*Response, error)
+    Rotate the signing secret (or create a first one for an older webhook). Returns the new
+    signingSecret once; the old secret keeps working for graceSeconds (default 24h, max 7 days).
+
+  DeleteWebhook(ctx, DeleteWebhookParams{ID},
+      *RequestOptions) (*Response, error)
+    Delete a webhook.
+
+
+================================================================================
+                          MULTIPART REQUESTS
+================================================================================
+
+  The following methods use multipart/form-data automatically:
+
+    - client.Messages.SendMMS(...)
+    - client.Messages.SendGroupMessage(...)
+    - client.Landings.CreateLanding(...)
+    - client.Landings.UpdateLanding(...)
+    - client.Brands.SubmitAppeal(...)
+    - client.Templates.UploadMedia(...)
+
+  You do not need to construct multipart writers manually. Pass file data
+  via io.Reader fields in the params struct and the SDK builds the form
+  data internally.
+
+
+================================================================================
+                          QUERY STRING HELPERS
+================================================================================
+
+  The SDK automatically constructs query strings from params struct fields.
+  Any field with its zero value (empty string, 0) is excluded, so you only
+  need to set the filters you care about.
+
+  Example:
+    // Only sends ?status=FAILED&page=1&limit=50
+    resp, err := client.Messages.GetMessages(ctx, signalhouse.GetMessagesParams{
+        Status: "FAILED",
+        Page:   "1",
+        Limit:  "50",
+    }, nil)
+
+
+================================================================================
+                             VALIDATION
+================================================================================
+
+  The SDK validates required parameters client-side before making any HTTP
+  request. If a required parameter is missing or empty, the SDK returns a
+  *ValidationError immediately -- no network request is made.
+
+  Validation errors:
+    - Type:    *signalhouse.ValidationError
+    - Message: "missing required parameter: <fieldName>"
+    - Implements the error interface
+
+  Check with errors.As:
+    var valErr *signalhouse.ValidationError
+    if errors.As(err, &valErr) {
+        fmt.Println(valErr.Field)
+    }
+
+
+================================================================================
+                           ERROR HANDLING
+================================================================================
+
+  The SDK uses a standardized response format. HTTP errors are NOT returned
+  as Go errors -- they are returned as *Response values with Success == false.
+
+  Success response:
+    &Response{Success: true, Data: map[...]interface{}{...}, Status: 200}
+
+  Error response:
+    &Response{Success: false, Error: "Error message", Status: 400}
+
+  Error types summary:
+
+    Source                    Behavior                         How to Handle
+    -----------------------------------------------------------------------
+    Missing required param    Returns error (*ValidationError) Check err != nil
+    HTTP 4xx/5xx from API     Returns *Response                Check resp.Success
+    Network failure           Returns error                    Check err != nil
+
+
+================================================================================
+                       COMPLETE INTEGRATION EXAMPLE
+================================================================================
+
+  package main
+
+  import (
+      "encoding/json"
+      "errors"
+      "fmt"
+      "log"
+      "net/http"
+      "os"
+      "strconv"
+
+      "github.com/signalhouse-sms/sdk-go/signalhouse"
+  )
+
+  func main() {
+      client, err := signalhouse.NewClient(signalhouse.Config{
+          APIKey:  os.Getenv("SIGNALHOUSE_API_KEY"),
+          BaseURL: "https://v2.signalhouse.io",
+      })
+      if err != nil {
+          log.Fatal(err)
+      }
+
+      // Send an SMS notification
+      http.HandleFunc("POST /api/notify", func(w http.ResponseWriter, r *http.Request) {
+          var req struct {
+              RecipientNumber string `json:"recipientNumber"`
+              Message         string `json:"message"`
+              SenderNumber    string `json:"senderNumber"`
+          }
+          if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+              http.Error(w, "invalid request body", http.StatusBadRequest)
+              return
+          }
+
+          resp, err := client.Messages.SendSMS(r.Context(), signalhouse.SendSMSParams{
+              SenderPhoneNumber:     req.SenderNumber,
+              RecipientPhoneNumbers: []string{req.RecipientNumber},
+              MessageBody:           req.Message,
+              StatusCallbackURL:     fmt.Sprintf("%s/api/delivery-status", os.Getenv("BASE_URL")),
+          }, nil)
+
+          var valErr *signalhouse.ValidationError
+          if errors.As(err, &valErr) {
+              http.Error(w, valErr.Error(), http.StatusBadRequest)
+              return
+          }
+          if err != nil {
+              http.Error(w, "internal server error", http.StatusInternalServerError)
+              return
+          }
+          if !resp.Success {
+              w.WriteHeader(resp.Status)
+              json.NewEncoder(w).Encode(map[string]string{"error": resp.Error})
+              return
+          }
+
+          json.NewEncoder(w).Encode(resp.Data)
+      })
+
+      // Receive delivery status callbacks
+      http.HandleFunc("POST /api/delivery-status", func(w http.ResponseWriter, r *http.Request) {
+          var status struct {
+              MessageID string `json:"messageId"`
+              Status    string `json:"status"`
+          }
+          json.NewDecoder(r.Body).Decode(&status)
+          fmt.Printf("Message %s status: %s\n", status.MessageID, status.Status)
+          json.NewEncoder(w).Encode(map[string]bool{"received": true})
+      })
+
+      // List phone numbers with per-request token override
+      http.HandleFunc("GET /api/numbers", func(w http.ResponseWriter, r *http.Request) {
+          userToken := r.Header.Get("Authorization")
+          if len(userToken) > 7 {
+              userToken = userToken[7:] // strip "Bearer "
+          }
+
+          page := r.URL.Query().Get("page")
+          if page == "" {
+              page = "1"
+          }
+          limit := r.URL.Query().Get("limit")
+          if limit == "" {
+              limit = "20"
+          }
+
+          resp, err := client.Numbers.GetPhoneNumbers(r.Context(), signalhouse.GetPhoneNumbersParams{
+              Page:  page,
+              Limit: limit,
+          }, &signalhouse.RequestOptions{Token: userToken})
+          if err != nil {
+              http.Error(w, "internal server error", http.StatusInternalServerError)
+              return
+          }
+          if !resp.Success {
+              w.WriteHeader(resp.Status)
+              json.NewEncoder(w).Encode(map[string]string{"error": resp.Error})
+              return
+          }
+
+          json.NewEncoder(w).Encode(resp.Data)
+      })
+
+      // Get message analytics
+      http.HandleFunc("GET /api/analytics", func(w http.ResponseWriter, r *http.Request) {
+          q := r.URL.Query()
+          resp, err := client.Messages.GetAnalytics(r.Context(), signalhouse.GetAnalyticsParams{
+              StartDate:  q.Get("startDate"),
+              EndDate:    q.Get("endDate"),
+              CampaignID: q.Get("campaignId"),
+          }, nil)
+          if err != nil {
+              http.Error(w, "internal server error", http.StatusInternalServerError)
+              return
+          }
+          if !resp.Success {
+              w.WriteHeader(resp.Status)
+              json.NewEncoder(w).Encode(map[string]string{"error": resp.Error})
+              return
+          }
+
+          json.NewEncoder(w).Encode(resp.Data)
+      })
+
+      log.Println("Server running on port 3000")
+      log.Fatal(http.ListenAndServe(":3000", nil))
+  }
+
+
+REGISTRATIONS AND REGIONAL REPORTING
+--------------------------------------------------------------------------------
+A registration is what a jurisdiction (or its provider) requires before a sender
+may message. One model covers every jurisdiction: `region` is the jurisdiction
+(US, GB, CA, AU; any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB) and `type` selects the shape of `data`.
+Types: TEN_DLC_BRAND, TEN_DLC_CAMPAIGN, TOLL_FREE_BRAND, TOLL_FREE_CAMPAIGN,
+SHORT_CODE_BRAND, SHORT_CODE_PROGRAM, SHORT_CODE_LEASE (not available), VIRTUAL_LONG_CODE (UK) and ALPHANUMERIC_SENDER_ID (UK). Kinds: identity, program, sender. Channels: tenDLC, tollFree,
+shortCode, virtualLongCode, alphanumeric.
+
+Start with the catalog. GET /registration/catalog?region= returns {region,
+jurisdiction, sendingRequiresRegistration, registeredThrough, provisioning, types:[{type, kind,
+channel, provider, bundles, quantity:{min,max}, requiresParent, available}]}.
+registeredThrough is "registration" (use this API), "brandsAndCampaigns" (the US:
+register through the Brands and Campaigns APIs) or null (nothing to register, e.g.
+Canada). An unlisted country requires registration and offers no types.
+Quote and submit only a type whose `available` is true; other types answer 400.
+
+GET /registration/quotes?region=&type=&quantity= (1-100, default 1) returns
+{data:[quotes]}, one quote per capability bundle: {capabilities, quantity,
+currency, setupAmount, monthlyAmount, totalSetupAmount, totalMonthlyAmount,
+etaDays}. Amounts are integer microdollars; setupAmount/monthlyAmount are per
+sender and the totals cover the quantity. groupId is optional and staff-only.
+
+Submit on POST /registration (201) with region, type, subgroupId,
+capabilities (one of the type's bundles) and data. Set RequestOptions.IdempotencyKey to make a
+retry safe (see IDEMPOTENT REQUESTS). Worked example, UK Virtual Long Code: type "VIRTUAL_LONG_CODE",
+capabilities ["SMS"] or ["SMS","VOICE"], data {quantity (1-100), useCases (1-10
+strings), voice?}. The voice dossier is required exactly when capabilities
+include VOICE: companyName, companyPhone, companyWebsite, companyEmail,
+address {line1,line2?,city,postalCode,country}, companyDescription,
+campaignName, campaignDescription, optInMethods (WEB|KEYWORD|VERBAL),
+optOutKeywords (STOP and UNSUBSCRIBE), callTypes (LANDLINE|LOCAL|INTERNATIONAL),
+callsPerDay (1-5), callDurationMinutes (1-10, 15, 30, 45 or 60) and termsUrl.
+
+Worked example, UK alphanumeric sender ID: region "GB", type
+"ALPHANUMERIC_SENDER_ID", capabilities ["SMS"], data {requestedSenderId (3-11
+letters, digits, spaces, dots or dashes; at least one letter), trafficOrigin
+(LOCAL: headquartered in the UK | INTERNATIONAL), trafficType (TRANSACTIONAL |
+PROMOTIONAL), companyName, companyCountry, companyWebsite (http/https), industry,
+messageExample, senderRelationship? (required when requestedSenderId differs from
+companyName)}. quantity is always 1; the quote is one ["SMS"] bundle, 6000000
+setup and 6000000 monthly by default. Once the registration is APPROVED,
+data.phoneNumbers holds the granted sender (e.g. ["ACME"]); pass it as the sender
+to send SMS to UK recipients. The server appends "\nOpt out: sihou.io/o/{code}"
+to every message from it, counted in segments and in the estimate.
+
+GET /registration accepts groupId, subgroupId, region, type, kind, status,
+parentRegistrationId, phoneNumber (filter to registrations holding this phone
+number), sortBy (createdAt (default), subgroupId, registrationId, region or
+status), sortOrder (asc or desc (default)), page and limit (max 100) and returns
+{data,totalCount,page,limit}.
+Region and Status each take one value or a comma-separated list (e.g.
+Status: "PENDING_PROVIDER,APPROVED").
+GET /registration/:registrationId returns
+{registrationId, groupId, subgroupId, region, type, kind, channel, provider,
+externalId, parentRegistrationId, status, stage, capabilities, submittedAt,
+approvedAt, expiresAt, review:{decision,reviewedAt,reason}, data:{...type
+fields}, history:[{status,stage,actor,actorType,timestamp,reason}], createdAt,
+updatedAt}. For VIRTUAL_LONG_CODE, data also carries phoneNumbers, the numbers
+allocated so far. Statuses: DRAFT, SIGNAL_HOUSE_REVIEW, SIGNAL_HOUSE_APPROVED,
+SIGNAL_HOUSE_REJECTED, SUBMITTING, PENDING_PROVIDER, NEEDS_INFORMATION,
+PAYMENT_REQUIRED (the setup fee could not be funded; retried hourly), APPROVED,
+REJECTED, CANCELLED, PENDING_DELETE, DELETED, EXPIRED, RECONCILIATION_REQUIRED.
+`stage` is the provider's step inside a status. Never send from a sender whose
+registration is not APPROVED.
+
+DELETE /registration/:registrationId cancels a registration (roles api, admin,
+developer, user). Allowed from SIGNAL_HOUSE_REVIEW, SIGNAL_HOUSE_APPROVED,
+PENDING_PROVIDER, NEEDS_INFORMATION, PAYMENT_REQUIRED and APPROVED (409
+otherwise). Numbers already allocated stay on the account and stop sending.
+
+Staff only (the admin namespace exists only when the client enables admin, and
+enabling it grants no server permission):
+POST /:registrationId/review {action:"APPROVE"|"REJECT",reason?}; REJECT needs reason.
+POST /:registrationId/corrections {reason,data} saves the type's correctable
+fields (VIRTUAL_LONG_CODE: useCases, voice?) while the provider waits; owner,
+quantity, bundle and provider order are fixed.
+POST /:registrationId/numbers {phoneNumber} allocates a provider-owned number
+through the recovery path.
+POST /:registrationId/reconcile {externalId} links the provider order that was
+placed after an ambiguous submission; never place a second order to retry.
+GET /:registrationId/application?format=json returns {filename,contentType,base64};
+decode base64 before saving the document.
+
+Regional reporting: GET /message, /message/analytics, /message/analytics/detail,
+/message/analytics/by-subgroup, /message/analytics/by-error-code, /message/dnc and
+/message/dnc/analytics accept region and regionScopes; GET
+/message/analytics/filter-options accepts region only. region is US, GB or CA
+(any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB) as a single value, a repeated parameter or a CSV.
+regionScopes is a JSON array of OR-ed branches {region, channels, brandId?,
+campaignId?, phoneNumber?} with channels from tenDLC, virtualLongCode, tollFree,
+shortCode and p2p; [] matches nothing and omitting both keeps the existing scope.
+Example:
+[{"region":"US","channels":["tenDLC"],"brandId":["BUS1"]},
+ {"region":"GB","channels":["virtualLongCode"],"phoneNumber":["447400123456"]}]
+GET /message always accepts them; the analytics and DNC reads accept them only
+where the environment serves hourly analytics and reject them with a 400 elsewhere.
+
+GetAnalytics, GetAnalyticsDetail, GetAnalyticsThroughput and GetDncAnalytics
+accept RegistrationID (a single id or a comma-separated list, like CampaignID):
+filter to traffic attributed to these registrations (hourly analytics only; a 400
+while hourly reads are off). Except on GetAnalyticsThroughput, which has no
+phoneNumber filter, a phoneNumber filter takes precedence. GetPhoneNumbers
+accepts a single RegistrationID to list the numbers provisioned under that
+registration.
+
+GetAnalyticsBySubgroup, GetAnalyticsByErrorCode and GetDncRecords accept RegistrationID
+the same way, with the same hourly-only rule and precedence. GetMessages accepts
+RegistrationID in every environment: it filters to messages attributed to those
+registrations, and a PhoneNumber filter narrows further. Every method returns 400 when
+RegistrationID is combined with CampaignID.
+
+GetAnalyticsFilterOptions returns each phone number with its type (TOLL_FREE,
+SHORT_CODE, ALPHANUMERIC, VIRTUAL_LONG_NUMBER, and older local-number spellings) and
+country (ISO-2), null when unknown. TOLL_FREE, SHORT_CODE and ALPHANUMERIC are channels
+by type; a US number of any other type is 10DLC and a non-US one is a Virtual Long Code.
+It also returns Carriers, a plain array of carrier name strings.
+
+UK sending is SMS only, from a +44 virtual long code to GB mobile recipients; MMS
+and group MMS are unavailable. POST /message/estimate accepts a +44 sender
+(recipients 10-15 digits) and returns region "GB", or "CA" for a Canadian sender.
+A READY alphanumeric sender ID (e.g. "ACME") also sends SMS to UK recipients only;
+its estimate includes the opt-out footer.
+
+LANGUAGE EXAMPLE
+  catalog, err := client.Registrations.GetCatalog(ctx, signalhouse.GetCatalogParams{Region: "GB"}, nil)
+  quotes, err := client.Registrations.GetQuotes(ctx, signalhouse.GetQuotesParams{Region: "GB", Type: "VIRTUAL_LONG_CODE", Quantity: 1}, nil)
+  _, err = client.Registrations.CreateRegistration(ctx, signalhouse.CreateRegistrationParams{
+      Region: "GB", Type: "VIRTUAL_LONG_CODE", SubgroupID: "SGEXAMPLE",
+      Capabilities: []string{"SMS"},
+      Data: map[string]any{"quantity": 1, "useCases": []string{"Support"}},
+  }, nil)
+  // UK alphanumeric sender ID
+  _, err = client.Registrations.GetQuotes(ctx, signalhouse.GetQuotesParams{Region: "GB", Type: "ALPHANUMERIC_SENDER_ID"}, nil)
+  _, err = client.Registrations.CreateRegistration(ctx, signalhouse.CreateRegistrationParams{
+      Region: "GB", Type: "ALPHANUMERIC_SENDER_ID", SubgroupID: "SGEXAMPLE",
+      Capabilities: []string{"SMS"},
+      Data: map[string]any{"requestedSenderId": "ACME", "trafficOrigin": "LOCAL", "trafficType": "TRANSACTIONAL",
+          "companyName": "Acme", "companyCountry": "United Kingdom", "companyWebsite": "https://acme.example",
+          "industry": "Retail", "messageExample": "Your Acme order has shipped."},
+  }, nil)
+  // Poll until status is APPROVED; data.phoneNumbers is then ["ACME"].
+  _, err = client.Registrations.GetRegistration(ctx, signalhouse.GetRegistrationParams{RegistrationID: "REG2"}, nil)
+  _, err = client.Messages.SendSMS(ctx, signalhouse.SendSMSParams{SenderPhoneNumber: "ACME",
+      RecipientPhoneNumbers: []string{"447400123456"}, MessageBody: "Your Acme order has shipped."}, nil)
+  _, err = client.Registrations.GetRegistrations(ctx, signalhouse.GetRegistrationsParams{Region: "GB", Status: "PENDING_PROVIDER"}, nil)
+  _, err = client.Registrations.GetRegistration(ctx, signalhouse.GetRegistrationParams{RegistrationID: "REG1"}, nil)
+  _, err = client.Registrations.CancelRegistration(ctx, signalhouse.CancelRegistrationParams{RegistrationID: "REG1"}, nil)
+  _, err = client.Registrations.Admin.ReviewRegistration(ctx, // EnableAdmin: true
+      signalhouse.ReviewRegistrationParams{RegistrationID: "REG1", Action: "APPROVE"}, nil)
+  _, err = client.Messages.GetMessages(ctx, signalhouse.GetMessagesParams{
+      Region: "US,GB", RegionScopes: `[{"region":"GB","channels":["virtualLongCode"]}]`,
+  }, nil)
+  _, err = client.Messages.GetAnalyticsFilterOptions(ctx, signalhouse.GetAnalyticsFilterOptionsParams{GroupID: "G1", Region: "GB"}, nil)
