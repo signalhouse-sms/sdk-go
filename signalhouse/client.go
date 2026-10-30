@@ -144,6 +144,7 @@ func NewClient(cfg Config) (*Client, error) {
 		c.Groups.Admin = &GroupsAdminService{client: c}
 		c.Subscriptions.Admin = &SubscriptionsAdminService{client: c}
 		c.Users.Admin = &UsersAdminService{client: c}
+		c.Auth.Admin = &AuthAdminService{client: c}
 		c.Numbers.Admin = &NumbersAdminService{client: c}
 		c.Registrations.Admin = &RegistrationsAdminService{client: c}
 		c.Onboarding.Admin = &OnboardingAdminService{client: c}

@@ -153,3 +153,88 @@ func (s *GroupsAdminService) LinkExternal(ctx context.Context, params AdminLinkE
 	}
 	return s.client.doJSON(ctx, "POST", "/group/link-external", params, opts)
 }
+
+// GetSsoConfiguration returns a group's Enterprise SSO configuration: whether SSO is available, the
+// redirect URL to register at the identity provider, the saved provider (never its client secret), and
+// each claimed domain with the DNS TXT record that verifies it
+// ({ groupId, available, callbackUrl, connection, domains }).
+func (s *GroupsService) GetSsoConfiguration(ctx context.Context, groupID string, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": groupID}); err != nil {
+		return nil, err
+	}
+	qs := buildQueryString(map[string]string{"groupId": groupID})
+	return s.client.doJSON(ctx, "GET", "/group/sso"+qs, nil, opts)
+}
+
+// SaveSsoConnectionParams are the parameters for the SaveSsoConnection method.
+type SaveSsoConnectionParams struct {
+	GroupID string `json:"groupId"`
+	// Issuer is the provider's https issuer URL.
+	Issuer string `json:"issuer"`
+	// ClientID is the client ID registered at the provider.
+	ClientID string `json:"clientId"`
+	// ClientSecret is required the first time; leave empty to keep the saved one.
+	ClientSecret string `json:"clientSecret,omitempty"`
+	// Enabled turns sign-in through the provider on or off (default true when nil).
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
+// SaveSsoConnection creates or updates a group's OpenID Connect identity provider and returns the SSO
+// configuration. Requires a fresh Auth.ConfirmTwoFactorIdentity from the same session.
+func (s *GroupsService) SaveSsoConnection(ctx context.Context, params SaveSsoConnectionParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{
+		"groupId":  params.GroupID,
+		"issuer":   params.Issuer,
+		"clientId": params.ClientID,
+	}); err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "PUT", "/group/sso", params, opts)
+}
+
+// DeleteSsoConnection removes a group's identity provider and its domains, and unlinks every account
+// that signed in through it. Returns the (now empty) SSO configuration. Requires a fresh
+// Auth.ConfirmTwoFactorIdentity from the same session.
+func (s *GroupsService) DeleteSsoConnection(ctx context.Context, groupID string, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": groupID}); err != nil {
+		return nil, err
+	}
+	qs := buildQueryString(map[string]string{"groupId": groupID})
+	return s.client.doJSON(ctx, "DELETE", "/group/sso"+qs, nil, opts)
+}
+
+// SsoDomainParams are the parameters for the AddSsoDomain, VerifySsoDomain and RemoveSsoDomain methods.
+type SsoDomainParams struct {
+	GroupID string `json:"groupId"`
+	// Domain is the email domain, e.g. "acme.com".
+	Domain string `json:"domain"`
+}
+
+// AddSsoDomain claims an email domain for a group's SSO. Returns the SSO configuration, which includes
+// the DNS TXT record that verifies the domain.
+func (s *GroupsService) AddSsoDomain(ctx context.Context, params SsoDomainParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID, "domain": params.Domain}); err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "POST", "/group/sso/domains", params, opts)
+}
+
+// VerifySsoDomain verifies a claimed domain by its DNS TXT record and returns the SSO configuration.
+func (s *GroupsService) VerifySsoDomain(ctx context.Context, params SsoDomainParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID, "domain": params.Domain}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/group/sso/domains/%s/verify", url.PathEscape(params.Domain))
+	body := map[string]string{"groupId": params.GroupID}
+	return s.client.doJSON(ctx, "POST", path, body, opts)
+}
+
+// RemoveSsoDomain removes a domain from a group's SSO and returns the SSO configuration.
+func (s *GroupsService) RemoveSsoDomain(ctx context.Context, params SsoDomainParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID, "domain": params.Domain}); err != nil {
+		return nil, err
+	}
+	qs := buildQueryString(map[string]string{"groupId": params.GroupID})
+	path := fmt.Sprintf("/group/sso/domains/%s", url.PathEscape(params.Domain))
+	return s.client.doJSON(ctx, "DELETE", path+qs, nil, opts)
+}

@@ -99,6 +99,66 @@ AUTH  (client.Auth)
       *RequestOptions) (*Response, error)
     Get token login history.
 
+  GetOAuthAuthorizationURLWithOptions(provider, OAuthAuthorizationURLParams{
+      Next, Email, LinkTicket, ReauthTicket}) (string, error)
+    Build the URL that starts an OAuth sign-in (navigate a browser to it; it is
+    a redirect, not an API call). provider: "google", "microsoft", "apple" or
+    "sso" (Enterprise SSO, requires Email unless ReauthTicket is set). Query
+    keys email, linkTicket, next, reauthTicket are added only when set. With a LinkTicket (from CreateOAuthLink) it links
+    the provider to the signed-in account instead of signing in; the API then
+    returns the browser to /Settings/Security with pendingLink=<ticket> (pass
+    it to ConfirmOAuthLink) or linkError. With a ReauthTicket (from
+    CreateOAuthReauth) the account signs in again to confirm it's them.
+    GetOAuthAuthorizationURL(provider, next) is unchanged and delegates here.
+
+  GetOAuthLinks(ctx, *RequestOptions) (*Response, error)
+    GET /auth/oauth/links. List the caller's sign-in methods.
+    Returns { passwordKnown, links: [{ provider, email, linkedAt, lastLoginAt }] }.
+
+  CreateOAuthLink(ctx, provider, *RequestOptions) (*Response, error)
+    POST /auth/oauth/:provider/link (no body). provider: "google", "microsoft"
+    or "apple". Requires a fresh ConfirmTwoFactorIdentity, which it spends.
+    Returns { linkTicket, expiresInSeconds }; pass linkTicket to
+    GetOAuthAuthorizationURLWithOptions.
+
+  CreateOAuthReauth(ctx, provider, *RequestOptions) (*Response, error)
+    POST /auth/oauth/:provider/reauth (no body). provider: "google",
+    "microsoft", "apple" or "sso", already linked to the account. Spends
+    nothing. Returns { reauthTicket, reauthSecret, expiresInSeconds } (keep reauthSecret for the confirm call); pass reauthTicket to
+    GetOAuthAuthorizationURLWithOptions. The browser comes back to
+    /Settings/Security with a single-use pendingReauth (the session that
+    started it redeems it with ConfirmOAuthReauth) or reauthError.
+
+  ConfirmOAuthReauth(ctx, pendingReauth, reauthSecret, *RequestOptions)
+      (*Response, error)
+    Finish signing in again with a linked provider. Sends a POST to
+    /auth/oauth/reauth/confirm with { pendingReauth, reauthSecret }. pendingReauth
+    is the
+    single-use value (valid 5 minutes) the CreateOAuthReauth round trip returns
+    to /Settings/Security with. It counts only for the same account and
+    session that started it; 400 when expired or used, 403 for another
+    account or session. reauthSecret is the value the create call returned;
+    a wrong or missing secret is refused (403) and uses up the re-sign-in.
+    Returns: { identityConfirmed } (true when 2FA is off, so it counts as a
+    confirmed identity).
+
+  ConfirmOAuthLink(ctx, pendingLink, *RequestOptions) (*Response, error)
+    POST /auth/oauth/links/confirm with body { pendingLink }. pendingLink is
+    required: the single-use value from the /Settings/Security?pendingLink=...
+    redirect that ends the CreateOAuthLink round trip. Links the provider, but
+    only for the account the link was started for. Returns the caller's
+    { passwordKnown, links: [{ provider, email, linkedAt, lastLoginAt }] }.
+
+  DeleteOAuthLink(ctx, provider, *RequestOptions) (*Response, error)
+    DELETE /auth/oauth/:provider/link. provider: "google", "microsoft", "apple"
+    or "sso". Requires a fresh ConfirmTwoFactorIdentity. 400 when it is the
+    account's only way to sign in. Returns the remaining { passwordKnown, links }.
+
+  Note: ConfirmTwoFactorIdentity also gates CreateOAuthLink, DeleteOAuthLink and
+  Groups.SaveSsoConnection / Groups.DeleteSsoConnection. With 2FA off, an account
+  without its own password (passwordKnown false) confirms with the code from
+  SendTwoFactorIdentityCode(ctx, "email", ...) and Method "email".
+
 
 BILLING  (client.Billing)
 --------------------------------------------------------------------------------
@@ -325,6 +385,40 @@ GROUPS  (client.Groups)
   UpdateGroup(ctx, UpdateGroupParams{ID, GroupData},
       *RequestOptions) (*Response, error)
     Update group information.
+
+  Enterprise SSO (role admin). Every SSO method returns the SSO configuration:
+  { groupId, available, callbackUrl, connection, domains }.
+
+  GetSsoConfiguration(ctx, groupID, *RequestOptions) (*Response, error)
+    GET /group/sso?groupId=. Get a group's Enterprise SSO configuration
+    (never includes the client secret).
+
+  SaveSsoConnection(ctx, SaveSsoConnectionParams{GroupID, Issuer, ClientID,
+      ClientSecret, Enabled}, *RequestOptions) (*Response, error)
+    PUT /group/sso. Create or update the group's OpenID Connect provider.
+    Required: GroupID, Issuer, ClientID. ClientSecret is required the first
+    time (empty keeps the saved one); Enabled is *bool (nil omits it).
+    Requires a fresh Auth.ConfirmTwoFactorIdentity.
+
+  DeleteSsoConnection(ctx, groupID, *RequestOptions) (*Response, error)
+    DELETE /group/sso?groupId=. Remove the provider and its domains and unlink
+    every account that signed in through it. Requires a fresh
+    Auth.ConfirmTwoFactorIdentity.
+
+  AddSsoDomain(ctx, SsoDomainParams{GroupID, Domain},
+      *RequestOptions) (*Response, error)
+    POST /group/sso/domains. Claim an email domain; the response includes the
+    DNS TXT record that verifies it.
+
+  VerifySsoDomain(ctx, SsoDomainParams{GroupID, Domain},
+      *RequestOptions) (*Response, error)
+    POST /group/sso/domains/:domain/verify (body { groupId }). Verify a claimed
+    domain by its DNS TXT record.
+
+  RemoveSsoDomain(ctx, SsoDomainParams{GroupID, Domain},
+      *RequestOptions) (*Response, error)
+    DELETE /group/sso/domains/:domain?groupId=. Remove a domain from the
+    group's SSO.
 
 
 LANDINGS  (client.Landings)

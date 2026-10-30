@@ -250,43 +250,6 @@ func (s *BrandsService) UpdateBusinessVerification(ctx context.Context, params U
 	return s.client.doJSON(ctx, "PUT", path, params.Details, opts)
 }
 
-// GetTollFreeIsvAccountParams are the parameters for the GetTollFreeIsvAccount method.
-type GetTollFreeIsvAccountParams struct {
-	GroupID string
-}
-
-// GetTollFreeIsvAccount returns a group's toll-free ISV account, its own top-level account at the toll-free provider,
-// without the API key secret; the data is null when the group has none. signalhouse_api, signalhouse_admin and
-// signalhouse_user only.
-func (s *BrandsService) GetTollFreeIsvAccount(ctx context.Context, params GetTollFreeIsvAccountParams, opts *RequestOptions) (*Response, error) {
-	if err := require(map[string]string{"groupId": params.GroupID}); err != nil {
-		return nil, err
-	}
-	path := fmt.Sprintf("/brand/toll-free-isv-account/%s", url.PathEscape(params.GroupID))
-	return s.client.doJSON(ctx, "GET", path, nil, opts)
-}
-
-// SetTollFreeIsvAccountParams are the parameters for the SetTollFreeIsvAccount method.
-type SetTollFreeIsvAccountParams struct {
-	GroupID string `json:"-"`
-	// AccountSID is the group's own top-level account at the toll-free provider.
-	AccountSID string `json:"accountSid"`
-	// APIKeySID is a Main API key created in that account.
-	APIKeySID string `json:"apiKeySid"`
-	// APIKeySecret is that key's secret, stored encrypted and never returned.
-	APIKeySecret string `json:"apiKeySecret"`
-}
-
-// SetTollFreeIsvAccount registers a group's toll-free ISV account, or replaces its API key, once the toll-free provider
-// accepts the account and key. Returns the stored account without the secret. signalhouse_admin only.
-func (s *BrandsService) SetTollFreeIsvAccount(ctx context.Context, params SetTollFreeIsvAccountParams, opts *RequestOptions) (*Response, error) {
-	if err := require(map[string]string{"groupId": params.GroupID, "accountSid": params.AccountSID, "apiKeySid": params.APIKeySID, "apiKeySecret": params.APIKeySecret}); err != nil {
-		return nil, err
-	}
-	path := fmt.Sprintf("/brand/toll-free-isv-account/%s", url.PathEscape(params.GroupID))
-	return s.client.doJSON(ctx, "PUT", path, params, opts)
-}
-
 // ShortCodeBrandDetails is the Short Code brand sub-object (brandData.shortCode).
 type ShortCodeBrandDetails struct {
 	BusinessRegistrationType string `json:"businessRegistrationType"`

@@ -127,7 +127,7 @@ type GetAnalyticsParams struct {
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
-	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless);
+	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics);
 	// single value or comma-separated list. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
 	CarrierFamily string
 	StartDate     string
@@ -193,7 +193,7 @@ type GetAnalyticsDetailParams struct {
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
-	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless);
+	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics);
 	// single value or comma-separated list. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
 	CarrierFamily string
 	StartDate     string
@@ -364,7 +364,7 @@ type GetAnalyticsBySubgroupParams struct {
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
-	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless);
+	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics);
 	// single value or comma-separated list. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
 	CarrierFamily string
 	StartDate     string
@@ -435,7 +435,7 @@ type GetAnalyticsByErrorCodeParams struct {
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
-	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless);
+	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics);
 	// single value or comma-separated list. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
 	CarrierFamily string
 	StartDate     string
@@ -587,7 +587,7 @@ type GetDncRecordsParams struct {
 // normalized keyword that revoked consent (e.g. "stop", "opt out"; a repeat opt-out records the
 // most recent word), null for opt-outs recorded before keyword capture shipped — and carrierFamily,
 // the resolved carrier family of the recipient number (Default, ATT, TMobile, Verizon, USCellular,
-// GoogleVoice, ClearSky, Interop, RogueMobile, Standard, IceWireless), copied from the inbound message that triggered the
+// GoogleVoice, ClearSky, Interop, RogueMobile, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics), copied from the inbound message that triggered the
 // opt-out.
 func (s *MessagesService) GetDncRecords(ctx context.Context, params GetDncRecordsParams, opts *RequestOptions) (*Response, error) {
 	qs := buildQueryString(map[string]string{
