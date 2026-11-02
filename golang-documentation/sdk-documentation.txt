@@ -122,8 +122,8 @@ AUTH  (client.Auth)
     GetOAuthAuthorizationURLWithOptions.
 
   CreateOAuthReauth(ctx, provider, *RequestOptions) (*Response, error)
-    POST /auth/oauth/:provider/reauth (no body). provider: "google",
-    "microsoft", "apple" or "sso", already linked to the account. Spends
+    POST /auth/oauth/:provider/reauth (no body). provider: "microsoft",
+    "apple" or "sso" (not Google, refused with 400), already linked to the account. Spends
     nothing. Returns { reauthTicket, reauthSecret, expiresInSeconds } (keep reauthSecret for the confirm call); pass reauthTicket to
     GetOAuthAuthorizationURLWithOptions. The browser comes back to
     /Settings/Security with a single-use pendingReauth (the session that
@@ -152,7 +152,7 @@ AUTH  (client.Auth)
   DeleteOAuthLink(ctx, provider, *RequestOptions) (*Response, error)
     DELETE /auth/oauth/:provider/link. provider: "google", "microsoft", "apple"
     or "sso". Requires a fresh ConfirmTwoFactorIdentity. 400 when it is the
-    account's only way to sign in. Returns the remaining { passwordKnown, links }.
+    account's only way to sign in. With 2FA on and no password, the last linked Microsoft, Apple or SSO sign-in is refused (400) too. Returns the remaining { passwordKnown, links }.
 
   Note: ConfirmTwoFactorIdentity also gates CreateOAuthLink, DeleteOAuthLink and
   Groups.SaveSsoConnection / Groups.DeleteSsoConnection. With 2FA off, an account

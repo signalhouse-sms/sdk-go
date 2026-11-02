@@ -129,6 +129,25 @@ func (s *CampaignsService) GetCampaignThroughputLimits(ctx context.Context, para
 	return s.client.doJSON(ctx, "GET", "/campaign/throughput-limits"+qs, nil, opts)
 }
 
+// GetGroupThroughputUsageParams holds the parameters for GetGroupThroughputUsage.
+type GetGroupThroughputUsageParams struct {
+	GroupID string
+}
+
+// GetGroupThroughputUsage returns today's T-Mobile usage against the daily limit for every active campaign in a group that has one: the same limits and counter as
+// GetCampaignThroughputLimits, for the whole group in one call.
+//
+// Response: [{ campaignId, brandId, brandName, usecase, tmobile: { tier, dailyLimit, usedToday: { date, segments, resetsAt } } }].
+// Campaigns without a T-Mobile limit (unverified brand, GOVERNMENT entity, PUBLIC_SAFETY_RESTRICTED usecase) are left out. The counter is per brand EIN and UTC day, so every campaign of a brand shows the same usage; a LOW_VOLUME campaign's limit is 2,000 whatever the brand's score.
+func (s *CampaignsService) GetGroupThroughputUsage(ctx context.Context, params GetGroupThroughputUsageParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID}); err != nil {
+		return nil, err
+	}
+
+	qs := buildQueryString(map[string]string{"groupId": params.GroupID})
+	return s.client.doJSON(ctx, "GET", "/campaign/throughput-usage"+qs, nil, opts)
+}
+
 // CreateCampaignData represents the data for creating a campaign.
 type CreateCampaignData struct {
 	BrandID                string   `json:"brandId"`

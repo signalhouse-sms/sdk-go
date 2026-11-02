@@ -213,8 +213,9 @@ func (s *AuthService) CreateOAuthLink(ctx context.Context, provider string, opts
 	return s.client.doJSON(ctx, "POST", fmt.Sprintf("/auth/oauth/%s/link", url.PathEscape(provider)), nil, opts)
 }
 
-// CreateOAuthReauth starts signing in again with provider ("google", "microsoft", "apple" or "sso"),
+// CreateOAuthReauth starts signing in again with provider ("microsoft", "apple" or "sso"),
 // which must already be linked to the caller's account, to confirm it's them. It spends nothing.
+// Google is refused with a 400 because it can't confirm a fresh sign-in; confirm with a code instead.
 // Returns a single-use ticket valid 2 minutes ({ reauthTicket, reauthSecret, expiresInSeconds }). Keep
 // reauthSecret in the client that started the flow: it is returned only here, and ConfirmOAuthReauth
 // needs it. Navigate the browser to GetOAuthAuthorizationURLWithOptions(provider, OAuthAuthorizationURLParams{ReauthTicket: ...}). The
@@ -255,7 +256,7 @@ func (s *AuthService) ConfirmOAuthLink(ctx context.Context, pendingLink string, 
 }
 
 // DeleteOAuthLink unlinks provider ("google", "microsoft", "apple" or "sso") from the caller's account.
-// Refused (400) when it is the account's only way to sign in. Requires a fresh ConfirmTwoFactorIdentity
+// Refused (400) when it is the account's only way to sign in. With 2FA on and no password, the last linked Microsoft, Apple or SSO sign-in is refused (400) too. Requires a fresh ConfirmTwoFactorIdentity
 // from the same session. Returns the remaining { passwordKnown, links }.
 func (s *AuthService) DeleteOAuthLink(ctx context.Context, provider string, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"provider": provider}); err != nil {
