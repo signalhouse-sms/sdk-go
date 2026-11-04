@@ -90,6 +90,10 @@ type GetRegistrationsParams struct {
 	ParentRegistrationID string
 	// PhoneNumber filters to registrations holding this phone number.
 	PhoneNumber string
+	// BrandID is for RCS agents only: filter to agents linked to this 10DLC brand (carrier ID, provisional UUID or _id).
+	BrandID string
+	// CampaignID is for RCS agents only: filter to agents linked to this 10DLC campaign (campaign ID or _id).
+	CampaignID string
 	// SortBy is createdAt (default), subgroupId, registrationId, region or status.
 	SortBy string
 	// SortOrder is asc or desc (default).
@@ -111,6 +115,8 @@ func (s *RegistrationsService) GetRegistrations(ctx context.Context, params GetR
 		"status":               params.Status,
 		"parentRegistrationId": params.ParentRegistrationID,
 		"phoneNumber":          params.PhoneNumber,
+		"brandId":              params.BrandID,
+		"campaignId":           params.CampaignID,
 		"sortBy":               params.SortBy,
 		"sortOrder":            params.SortOrder,
 		"page":                 params.Page,
@@ -133,14 +139,88 @@ func (s *RegistrationsService) GetRegistration(ctx context.Context, params GetRe
 	return s.client.doJSON(ctx, "GET", path, nil, opts)
 }
 
+// UpdateRegistrationParams are the parameters for the UpdateRegistration method.
+type UpdateRegistrationParams struct {
+	// RegistrationID is the registration ID (e.g. RCSA7K2M1QZ8RP). Required.
+	RegistrationID string
+	// Data is a partial of the type's create fields, sent as the request body. For RCS_AGENT, agent and consent merge
+	// field by field, every other key replaces, and "campaignId": nil unlinks the campaign. Required.
+	Data map[string]any
+}
+
+// UpdateRegistration edits a draft, or a registration Signal House rejected, before it is submitted (types that keep
+// drafts, such as RCS_AGENT) and returns the updated registration. 409 once submitted.
+func (s *RegistrationsService) UpdateRegistration(ctx context.Context, params UpdateRegistrationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"registrationId": params.RegistrationID}); err != nil {
+		return nil, err
+	}
+	if params.Data == nil {
+		return nil, &ValidationError{Field: "data"}
+	}
+	path := fmt.Sprintf("/registration/%s", url.PathEscape(params.RegistrationID))
+	return s.client.doJSON(ctx, "PUT", path, params.Data, opts)
+}
+
+// ValidateRegistrationParams are the parameters for the ValidateRegistration method.
+type ValidateRegistrationParams struct {
+	// RegistrationID is the registration ID (e.g. RCSA7K2M1QZ8RP). Required.
+	RegistrationID string
+}
+
+// ValidateRegistration checks a draft against every submit requirement and the live state of its links, without
+// writing, and returns {valid, errors: [{field, reason}], warnings: [{field, reason}]}.
+func (s *RegistrationsService) ValidateRegistration(ctx context.Context, params ValidateRegistrationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"registrationId": params.RegistrationID}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/registration/%s/validate", url.PathEscape(params.RegistrationID))
+	return s.client.doJSON(ctx, "POST", path, nil, opts)
+}
+
+// SubmitRegistrationParams are the parameters for the SubmitRegistration method.
+type SubmitRegistrationParams struct {
+	// RegistrationID is the registration ID (e.g. RCSA7K2M1QZ8RP). Required.
+	RegistrationID string
+}
+
+// SubmitRegistration submits a draft and returns it: a type Signal House reviews goes to SIGNAL_HOUSE_REVIEW; a type
+// it does not (RCS_AGENT) goes to SUBMITTING and is filed with the provider at once. A draft that fails a requirement
+// gets a 400 whose details carry {code: "REGISTRATION_INCOMPLETE", errors, warnings}; a second submit, or one of a
+// registration the provider already holds, gets a 409.
+func (s *RegistrationsService) SubmitRegistration(ctx context.Context, params SubmitRegistrationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"registrationId": params.RegistrationID}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/registration/%s/submit", url.PathEscape(params.RegistrationID))
+	return s.client.doJSON(ctx, "POST", path, nil, opts)
+}
+
+// LaunchRegistrationParams are the parameters for the LaunchRegistration method.
+type LaunchRegistrationParams struct {
+	// RegistrationID is the registration ID (e.g. RCSA7K2M1QZ8RP). Required.
+	RegistrationID string
+}
+
+// LaunchRegistration requests the launch of a registration the provider already holds (an RCS agent in testing) and
+// returns it in SIGNAL_HOUSE_REVIEW, whose approval files the provider's launch request. Allowed while the provider
+// reports the agent ready for testing, after a Signal House rejection, or after every carrier refused an earlier launch
+// (409 otherwise); a failed requirement is a 400 whose details carry {code: "REGISTRATION_INCOMPLETE", errors, warnings}.
+func (s *RegistrationsService) LaunchRegistration(ctx context.Context, params LaunchRegistrationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"registrationId": params.RegistrationID}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/registration/%s/launch", url.PathEscape(params.RegistrationID))
+	return s.client.doJSON(ctx, "POST", path, nil, opts)
+}
+
 // CancelRegistrationParams are the parameters for the CancelRegistration method.
 type CancelRegistrationParams struct {
 	RegistrationID string
 }
 
 // CancelRegistration cancels a registration. Allowed from SIGNAL_HOUSE_REVIEW, SIGNAL_HOUSE_APPROVED,
-// PENDING_PROVIDER, NEEDS_INFORMATION, PAYMENT_REQUIRED and APPROVED (409 otherwise). Numbers already allocated
-// stay on the account and stop sending.
+// PENDING_PROVIDER, NEEDS_INFORMATION, PAYMENT_REQUIRED and APPROVED (409 otherwise), and for types that keep
+// drafts also from DRAFT and SIGNAL_HOUSE_REJECTED. Numbers already allocated stay on the account and stop sending.
 func (s *RegistrationsService) CancelRegistration(ctx context.Context, params CancelRegistrationParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"registrationId": params.RegistrationID}); err != nil {
 		return nil, err

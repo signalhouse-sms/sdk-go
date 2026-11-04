@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const rcsBody = `{"channel":"rcs","contentFormat":"rcs.blocks.v1","content":{"blocks":[{"id":"b1","kind":"text","text":"Hi {{first_name}}"}]},"variables":[{"key":"first_name","type":"text","required":true}],"defaults":{},"fallback":{}}`
+const rcsBody = `{"channel":"rcs","contentFormat":"content.v1","content":{"blocks":[{"id":"b1","kind":"text","text":"Hi {{first_name}}"}]},"variables":[{"key":"first_name","type":"text","required":true}],"defaults":{},"fallback":{}}`
 
 func TestTemplateTransport(t *testing.T) {
 	server, last := newCaptureServer(t)
@@ -149,6 +149,16 @@ func TestTemplateTransport(t *testing.T) {
 	}
 	if last.uri != "/template/capabilities?channel=rcs&groupId=G1&provider=sinch" {
 		t.Fatalf("capabilities contract: %s", last.uri)
+	}
+
+	if _, err := mt.GeocodeAddress(ctx, GeocodeAddressParams{GroupID: "G1", Address: "Chicago"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.uri != "/template/geocode?address=Chicago&groupId=G1" {
+		t.Fatalf("geocode contract: %s", last.uri)
+	}
+	if _, err := mt.GeocodeAddress(ctx, GeocodeAddressParams{GroupID: "G1"}, nil); err == nil {
+		t.Fatal("geocode without an address must fail")
 	}
 }
 

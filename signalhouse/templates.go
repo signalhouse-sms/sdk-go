@@ -24,7 +24,7 @@ type CreateTemplateParams struct {
 	Name string `json:"name"`
 	// Tag is 1-60 characters; empty omits it.
 	Tag string `json:"tag,omitempty"`
-	// Body is the raw RcsTemplateBody (channel "rcs", contentFormat "rcs.blocks.v1", content.blocks, variables,
+	// Body is the raw RcsTemplateBody (channel "rcs", optional contentFormat defaulting to "content.v1", content, variables,
 	// defaults, fallback), e.g. a json.RawMessage or map[string]any. It is sent verbatim.
 	Body any `json:"body"`
 }
@@ -196,6 +196,24 @@ func (s *TemplatesService) Capabilities(ctx context.Context, params GetCapabilit
 		return nil, err
 	}
 	return s.client.doJSON(ctx, "GET", "/template/capabilities"+qs, nil, opts)
+}
+
+// GeocodeAddressParams are the parameters for the GeocodeAddress method.
+type GeocodeAddressParams struct {
+	GroupID string
+	// Address is the address to resolve (1-512 characters).
+	Address string
+}
+
+// GeocodeAddress resolves an address to coordinates for a VIEW_LOCATION suggestion: {address, latitude, longitude,
+// partialMatch}. 400 LOCATION_NOT_FOUND when nothing matches; 429 past the group's lookup window; 503 when the server
+// has no geocoding provider.
+func (s *TemplatesService) GeocodeAddress(ctx context.Context, params GeocodeAddressParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID, "address": params.Address}); err != nil {
+		return nil, err
+	}
+	qs := buildQueryString(map[string]string{"groupId": params.GroupID, "address": params.Address})
+	return s.client.doJSON(ctx, "GET", "/template/geocode"+qs, nil, opts)
 }
 
 // UploadMediaParams are the parameters for the UploadMedia method.
