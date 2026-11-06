@@ -47,7 +47,7 @@ type GetMessagesParams struct {
 	// MessageType accepts a single value (e.g. "SMS") or a comma-separated list (e.g. "SMS,MMS").
 	// Allowed values: SMS, MMS, RCS, WHATSAPP, VIBER, P2P. Empty defaults to all non-P2P types.
 	MessageType string
-	// Channel filters by "tenDLC", "virtualLongCode", "tollFree", "shortCode", or "p2p" (single value or comma-separated list).
+	// Channel filters by "tenDLC", "virtualLongCode", "tollFree", "shortCode", "p2p", or "rcs" (single value or comma-separated list).
 	// Older messages without a stored channel count as tenDLC.
 	Channel string
 	Carrier string
@@ -75,9 +75,24 @@ type GetMessagesParams struct {
 	// RegionScopes is a JSON array of OR-ed branches {region, channels, brandId?, campaignId?, phoneNumber?}
 	// (channels: tenDLC, virtualLongCode, tollFree, shortCode, p2p); "[]" matches nothing.
 	RegionScopes string
+	// TemplateID returns the RCS messages sent from this template.
+	TemplateID string
+	// TemplateVersion returns the RCS messages sent from this template version.
+	TemplateVersion string
+	// BulkID returns the RCS messages of one send.
+	BulkID string
+	// FallbackReason is why an RCS message ran its fallback: NOT_CAPABLE, CARRIER_NOT_LAUNCHED, TTL_EXPIRED, RCS_ERROR,
+	// PROVIDER_ERROR or SMS_ONLY.
+	FallbackReason string
+	// BillingClass is the RCS billing class: RICH or RICH_MEDIA.
+	BillingClass string
+	// DeliveredChannel is the channel that delivered an RCS message: rcs, sms or mms.
+	DeliveredChannel string
+	// IsTest set to true returns RCS test messages only, and to false leaves them out. nil omits it.
+	IsTest *bool
 }
 
-// GetMessages returns a list of messages with optional filters.
+// GetMessages returns a list of messages with optional filters. TemplateID through IsTest are RCS filters.
 //
 // Inbound messages in the response also carry sentimentScore (-100..100, null when unscored),
 // sentimentLabel ("positive", "neutral" or "negative", null when sentimentScore is null) and
@@ -109,8 +124,29 @@ func (s *MessagesService) GetMessages(ctx context.Context, params GetMessagesPar
 		"page":                 params.Page,
 		"limit":                params.Limit,
 		"dateBounds":           params.DateBounds,
+		"templateId":           params.TemplateID,
+		"templateVersion":      params.TemplateVersion,
+		"bulkId":               params.BulkID,
+		"fallbackReason":       params.FallbackReason,
+		"billingClass":         params.BillingClass,
+		"deliveredChannel":     params.DeliveredChannel,
+		"isTest":               boolQueryValue(params.IsTest),
 	})
 	return s.client.doJSON(ctx, "GET", "/message"+qs, nil, opts)
+}
+
+// GetMessageParams are the parameters for the GetMessage method.
+type GetMessageParams struct {
+	// ID is the message ID. Required.
+	ID string
+}
+
+// GetMessage returns one message of any type by its ID; an unknown ID is a 404.
+func (s *MessagesService) GetMessage(ctx context.Context, params GetMessageParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"id": params.ID}); err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "GET", "/message/"+url.PathEscape(params.ID), nil, opts)
 }
 
 // GetAnalyticsParams are the parameters for the GetAnalytics method.
@@ -122,13 +158,12 @@ type GetAnalyticsParams struct {
 	SubgroupID string
 	BrandID    string
 	CampaignID string
-	// RegistrationID filters to traffic attributed to these registrations (hourly analytics only; a 400
-	// while hourly reads are off). A PhoneNumber filter takes precedence. Single value or comma-separated list.
+	// RegistrationID filters to traffic attributed to these registrations. A PhoneNumber filter takes precedence. Single value or comma-separated list.
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
 	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics);
-	// single value or comma-separated list. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
+	// single value or comma-separated list.
 	CarrierFamily string
 	StartDate     string
 	EndDate       string
@@ -143,8 +178,7 @@ type GetAnalyticsParams struct {
 	// UTC day. "exact": a timestamp is bound as the instant it names and a
 	// bare date is its whole UTC day. Empty: "day".
 	DateBounds string
-	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list). Only
-	// accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400.
+	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list).
 	Region string
 	// RegionScopes is a JSON array of OR-ed branches {region, channels, brandId?, campaignId?, phoneNumber?}
 	// (channels: tenDLC, virtualLongCode, tollFree, shortCode, p2p); "[]" matches nothing. Same hourly-analytics
@@ -188,13 +222,12 @@ type GetAnalyticsDetailParams struct {
 	SubgroupID string
 	BrandID    string
 	CampaignID string
-	// RegistrationID filters to traffic attributed to these registrations (hourly analytics only; a 400
-	// while hourly reads are off). A PhoneNumber filter takes precedence. Single value or comma-separated list.
+	// RegistrationID filters to traffic attributed to these registrations. A PhoneNumber filter takes precedence. Single value or comma-separated list.
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
 	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics);
-	// single value or comma-separated list. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
+	// single value or comma-separated list.
 	CarrierFamily string
 	StartDate     string
 	EndDate       string
@@ -208,20 +241,17 @@ type GetAnalyticsDetailParams struct {
 	// Granularity is the time-bucket grain of the byDate rows: "day" or "hour". Empty means day (each
 	// row's _id is a "YYYY-MM-DD" date). "hour" buckets by hour (each row's _id is a
 	// "YYYY-MM-DD HH:MM:SS" UTC hour; StartDate is floored to its hour and EndDate honoured as given)
-	// and is capped to a 7-day span. Only accepted where the environment serves hourly analytics;
-	// elsewhere any value, including "day", is rejected with a 400 -- leave it empty unless hour
-	// grain is wanted.
+	// and is capped to a 7-day span.
 	Granularity string
 	// Breakdown is "carrier" or "carrierFamily". It adds a byBreakdown time × dimension series to the
 	// response ({dimension, rows}: each row is one byDate bucket (_id) for one carrier or carrier family
-	// (key), top 50 keys by volume, excluding P2P) and caps the span at 31 days. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
+	// (key), top 50 keys by volume, excluding P2P) and caps the span at 31 days.
 	Breakdown string
 	// DateBounds is which contract binds StartDate/EndDate. "day": each bound is widened to its whole
 	// UTC day. "exact": a timestamp is bound as the instant it names and a
 	// bare date is its whole UTC day. Empty: "day".
 	DateBounds string
-	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list). Only
-	// accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400.
+	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list).
 	Region string
 	// RegionScopes is a JSON array of OR-ed branches {region, channels, brandId?, campaignId?, phoneNumber?}
 	// (channels: tenDLC, virtualLongCode, tollFree, shortCode, p2p); "[]" matches nothing. Same hourly-analytics
@@ -267,8 +297,7 @@ type GetAnalyticsThroughputParams struct {
 	GroupID    string
 	BrandID    string
 	CampaignID string
-	// RegistrationID filters to traffic attributed to these registrations (hourly analytics only; a 400
-	// while hourly reads are off). Single value or comma-separated list.
+	// RegistrationID filters to traffic attributed to these registrations. Single value or comma-separated list.
 	RegistrationID string
 	// CarrierFamily filters by carrier family (ATT, TMobile, Verizon, USCellular, ...).
 	CarrierFamily string
@@ -294,8 +323,7 @@ type GetAnalyticsThroughputParams struct {
 // GetAnalyticsThroughput returns per-minute send throughput (peak segments per minute, sending
 // minutes, minutes at a ceiling) per time bucket and per carrier family. Measured from SENT
 // transitions at campaign × carrier-family grain — the grain carrier ceilings are enforced at — so
-// a peak here is the figure a ceiling is compared against. Only accepted where the environment
-// serves hourly analytics; elsewhere the request is rejected with a 400.
+// a peak here is the figure a ceiling is compared against.
 //
 // Response: totals, byDate, byCarrierFamily and byBreakdown ({dimension: "carrierFamily", rows}).
 // Every row carries segments, messages, peakSegmentsPerMinute, peakMessagesPerMinute, peakMinute
@@ -330,7 +358,7 @@ func (s *MessagesService) GetAnalyticsThroughput(ctx context.Context, params Get
 type GetAnalyticsFilterOptionsParams struct {
 	GroupID string
 	// Region restricts the options to "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated
-	// list). Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400.
+	// list).
 	Region string
 }
 
@@ -359,13 +387,12 @@ type GetAnalyticsBySubgroupParams struct {
 	SubgroupID string
 	BrandID    string
 	CampaignID string
-	// RegistrationID filters to traffic attributed to these registrations (hourly analytics only; a 400
-	// while hourly reads are off). A PhoneNumber filter takes precedence. Single value or comma-separated list.
+	// RegistrationID filters to traffic attributed to these registrations. A PhoneNumber filter takes precedence. Single value or comma-separated list.
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
 	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics);
-	// single value or comma-separated list. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
+	// single value or comma-separated list.
 	CarrierFamily string
 	StartDate     string
 	EndDate       string
@@ -380,8 +407,7 @@ type GetAnalyticsBySubgroupParams struct {
 	// UTC day. "exact": a timestamp is bound as the instant it names and a
 	// bare date is its whole UTC day. Empty: "day".
 	DateBounds string
-	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list). Only
-	// accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400.
+	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list).
 	Region string
 	// RegionScopes is a JSON array of OR-ed branches {region, channels, brandId?, campaignId?, phoneNumber?}
 	// (channels: tenDLC, virtualLongCode, tollFree, shortCode, p2p); "[]" matches nothing. Same hourly-analytics
@@ -430,13 +456,12 @@ type GetAnalyticsByErrorCodeParams struct {
 	SubgroupID string
 	BrandID    string
 	CampaignID string
-	// RegistrationID filters to traffic attributed to these registrations (hourly analytics only; a 400
-	// while hourly reads are off). A PhoneNumber filter takes precedence. Single value or comma-separated list.
+	// RegistrationID filters to traffic attributed to these registrations. A PhoneNumber filter takes precedence. Single value or comma-separated list.
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
 	// CarrierFamily filters by the recipient's resolved carrier family (Default, ATT, TMobile, Verizon, USCellular, GoogleVoice, ClearSky, Interop, RogueMobile, P2P, Standard, IceWireless, Bell, Rogers, Telus, Videotron, SaskTel, Eastlink, Fibernetics);
-	// single value or comma-separated list. Only accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400 -- omit the parameter unless it is wanted.
+	// single value or comma-separated list.
 	CarrierFamily string
 	StartDate     string
 	EndDate       string
@@ -447,8 +472,7 @@ type GetAnalyticsByErrorCodeParams struct {
 	// UTC day. "exact": a timestamp is bound as the instant it names and a
 	// bare date is its whole UTC day. Empty: "day".
 	DateBounds string
-	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list). Only
-	// accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400.
+	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list).
 	Region string
 	// RegionScopes is a JSON array of OR-ed branches {region, channels, brandId?, campaignId?, phoneNumber?}
 	// (channels: tenDLC, virtualLongCode, tollFree, shortCode, p2p); "[]" matches nothing. Same hourly-analytics
@@ -492,8 +516,7 @@ type GetDncAnalyticsParams struct {
 	SubgroupID string
 	BrandID    string
 	CampaignID string
-	// RegistrationID filters to traffic attributed to these registrations (hourly analytics only; a 400
-	// while hourly reads are off). A PhoneNumber filter takes precedence. Single value or comma-separated list.
+	// RegistrationID filters to traffic attributed to these registrations. A PhoneNumber filter takes precedence. Single value or comma-separated list.
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
@@ -507,8 +530,7 @@ type GetDncAnalyticsParams struct {
 	// UTC day. "exact": a timestamp is bound as the instant it names and a
 	// bare date is its whole UTC day. Empty: "day".
 	DateBounds string
-	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list). Only
-	// accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400.
+	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list).
 	Region string
 	// RegionScopes is a JSON array of OR-ed branches {region, channels, brandId?, campaignId?, phoneNumber?}
 	// (channels: tenDLC, virtualLongCode, tollFree, shortCode, p2p); "[]" matches nothing. Same hourly-analytics
@@ -552,8 +574,7 @@ type GetDncRecordsParams struct {
 	SubgroupID string
 	BrandID    string
 	CampaignID string
-	// RegistrationID filters to traffic attributed to these registrations (hourly analytics only; a 400
-	// while hourly reads are off). A PhoneNumber filter takes precedence. Single value or comma-separated list.
+	// RegistrationID filters to traffic attributed to these registrations. A PhoneNumber filter takes precedence. Single value or comma-separated list.
 	RegistrationID string
 	PhoneNumber    string
 	Carrier        string
@@ -571,8 +592,7 @@ type GetDncRecordsParams struct {
 	// UTC day. "exact": a timestamp is bound as the instant it names and a
 	// bare date is its whole UTC day. Empty: "day".
 	DateBounds string
-	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list). Only
-	// accepted where the environment serves hourly analytics; elsewhere any value is rejected with a 400.
+	// Region filters by "US", "GB", or "CA" (any case of "UK"/"GB"/"GBR"/"United Kingdom" is accepted for GB; single value or comma-separated list).
 	Region string
 	// RegionScopes is a JSON array of OR-ed branches {region, channels, brandId?, campaignId?, phoneNumber?}
 	// (channels: tenDLC, virtualLongCode, tollFree, shortCode, p2p); "[]" matches nothing. Same hourly-analytics

@@ -29,7 +29,8 @@ type CreateTemplateParams struct {
 	Body any `json:"body"`
 }
 
-// Create creates a template with draft version 1 and returns {head, version} (HTTP 201).
+// Create creates a template with draft version 1 and returns {head, version, validation} (HTTP 201). validation is
+// {valid, errors, warnings}, or null when the checks could not run; the draft saves even when it lists errors.
 func (s *TemplatesService) Create(ctx context.Context, params CreateTemplateParams, opts *RequestOptions) (*Response, error) {
 	if err := checkCreateTemplate(params); err != nil {
 		return nil, err
@@ -97,7 +98,8 @@ type UpdateTemplateParams struct {
 	Body any
 }
 
-// Update edits the draft (creating one from the published version if needed) and returns {head, version}.
+// Update edits the draft (creating one from the published version if needed) and returns {head, version, validation}.
+// validation is {valid, errors, warnings}, or null when the checks could not run; the draft saves even when it lists errors.
 func (s *TemplatesService) Update(ctx context.Context, params UpdateTemplateParams, opts *RequestOptions) (*Response, error) {
 	body, err := templateUpdateBody(params)
 	if err != nil {
@@ -113,7 +115,7 @@ type PublishTemplateParams struct {
 	GroupID    string
 }
 
-// Publish publishes the current draft and returns {head, version}. An incomplete draft is a 400
+// Publish publishes the current draft and returns {head, version, warnings}. An incomplete draft is a 400
 // TEMPLATE_INVALID carrying errors and warnings; no draft is a 409 NO_DRAFT, and a draft that changed while it
 // was being published is a 409 DRAFT_CHANGED (publish again).
 func (s *TemplatesService) Publish(ctx context.Context, params PublishTemplateParams, opts *RequestOptions) (*Response, error) {

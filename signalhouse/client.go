@@ -74,7 +74,7 @@ type Client struct {
 	Messages  *MessagesService
 	// Templates is the message template API (/template).
 	Templates *TemplatesService
-	// Rcs groups RCS resources; client.Rcs.Agents is the RCS agent API (/rcs/agent).
+	// Rcs groups RCS resources; client.Rcs.Agents is the RCS agent API (/rcs/agent) and client.Rcs.Messages the RCS messages.
 	Rcs           *RcsService
 	Notifications *NotificationsService
 	Numbers       *NumbersService
@@ -121,6 +121,7 @@ func NewClient(cfg Config) (*Client, error) {
 	c.Templates = &TemplatesService{client: c}
 	c.Rcs = &RcsService{client: c}
 	c.Rcs.Agents = &RcsAgentsService{client: c}
+	c.Rcs.Messages = &RcsMessagesService{client: c}
 	c.Notifications = &NotificationsService{client: c}
 	c.Numbers = &NumbersService{client: c, enableAdmin: cfg.EnableAdmin}
 	c.Registrations = &RegistrationsService{client: c, enableAdmin: cfg.EnableAdmin}

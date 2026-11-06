@@ -420,9 +420,14 @@ MESSAGES  (client.Messages)
 --------------------------------------------------------------------------------
   GetMessages(ctx, GetMessagesParams{ID, CampaignID, BrandID, SubgroupID,
       GroupID, Status, Direction, MessageType, Carrier, SentimentLabel,
-      ErrorCode, StartDate, EndDate, SortField, SortOrder, Page, Limit},
-      *RequestOptions) (*Response, error)
-    List messages with extensive filters.
+      ErrorCode, StartDate, EndDate, SortField, SortOrder, Page, Limit,
+      TemplateID, TemplateVersion, BulkID, FallbackReason, BillingClass,
+      DeliveredChannel, IsTest}, *RequestOptions) (*Response, error)
+    List messages with extensive filters. TemplateID through IsTest are RCS
+    filters.
+
+  GetMessage(ctx, GetMessageParams{ID}, *RequestOptions) (*Response, error)
+    GET /message/:id. Get one message of any type. An unknown ID is a 404. Required: ID
 
   GetAnalytics(ctx, GetAnalyticsParams{GroupID, SubgroupID, BrandID,
       CampaignID, RegistrationID, PhoneNumber, Carrier, StartDate, EndDate},
@@ -477,7 +482,10 @@ TEMPLATES  (client.Templates)
 
   Create(ctx, CreateTemplateParams{GroupID, Name, Tag,
       Body}, *RequestOptions) (*Response, error)
-    POST /template. Creates draft version 1; returns 201 {head, version}.
+    POST /template. Creates draft version 1; returns 201 {head, version, validation}.
+    validation is {valid, errors, warnings}, null when the checks could not run; update returns it too, and
+    publish returns {head, version, warnings}. A draft saves even when validation lists errors. On an RCS send, a
+    blocked row carries blockReason, reason and issues.
 
   List(ctx, GetTemplatesParams{GroupID, State, Channel,
       Tag, Search, SortBy, SortOrder, Page, Limit},
@@ -523,6 +531,8 @@ TEMPLATES  (client.Templates)
       *RequestOptions) (*Response, error)
     GET /template/capabilities. Channel defaults to "rcs"; Provider
     infobip|sinch adds provider limits and unsupported features.
+    Returns the allowed content, limits, time to live ranges (ttlPresets),
+    traffic types per use case and iPhone layout numbers (ios).
 
   GeocodeAddress(ctx, GeocodeAddressParams{GroupID, Address},
       *RequestOptions) (*Response, error)
@@ -540,10 +550,10 @@ TEMPLATES  (client.Templates)
 
 RCS AGENTS  (client.Rcs.Agents)
 --------------------------------------------------------------------------------
-  RCS agents under /rcs/agent. An agent links one 10DLC brand and one 10DLC
-  campaign: the campaign's numbers are its SMS fallback, and the brand and
-  campaign supply the company identity and consent text for the carrier
-  launch. One brand or campaign can serve many agents. An agent is a
+  RCS agents under /rcs/agent. An agent links one brand and one campaign, of
+  any registration type: the campaign's numbers are its SMS fallback, and the
+  brand and campaign supply the company identity and consent text for the
+  carrier launch. One brand or campaign can serve many agents. An agent is a
   registration (type RCS_AGENT, AgentID = registrationId "RCSA" + 10
   characters). 404 while RCS is disabled for the environment; 400 while the
   group's rcsEnabled flag is off. To use a new brand and campaign, create the
@@ -614,6 +624,9 @@ RCS AGENTS  (client.Rcs.Agents)
     Signal House's approval files the launch with the carrier partner. Allowed
     from IN_TESTING, REJECTED and CARRIER_REJECTED (409 otherwise); a failed
     requirement is 400 REGISTRATION_INCOMPLETE.
+    The request charges the agent's launch fees: a wallet that cannot cover
+    them gets a 402, and the agent stays where it is.
+    The agent's launchFees quotes what the next request charges.
 
   Archive(ctx, RcsAgentParams{AgentID}, *RequestOptions) (*Response, error)
     POST /rcs/agent/:agentId/archive. Archive the agent.
@@ -630,6 +643,72 @@ RCS AGENTS  (client.Rcs.Agents)
 
   Set RequestOptions.IdempotencyKey on Create, Update, Submit, Archive and
   UploadAsset to make a retry safe (see IDEMPOTENT REQUESTS).
+
+
+RCS MESSAGES  (client.Rcs.Messages)
+--------------------------------------------------------------------------------
+  Send through an agent. 404 while RCS is off for the environment, 403 while
+  the group's rcsEnabled flag is off, 409 while the agent cannot send yet.
+
+  Send(ctx, SendRcsMessageParams{AgentID, Recipients, TemplateID,
+      TemplateVersion, Content, ContentFormat, TrafficType, TTLSeconds,
+      ExpireTime, Fallback, StatusCallbackURL, EnableShortlink, IsTest,
+      Simulate}, *RequestOptions) (*Response, error)
+    POST /message/rcs.
+    Send to up to 100 recipients. A blocked recipient gets a BLOCKED message and
+    the rest still send. Exactly one of TemplateID or Content; at most one of
+    TTLSeconds or ExpireTime. ContentFormat: content.v1 (default) | google.rcs.
+    Recipients is a list of { phoneNumber, variables, clientMessageId, metadata }.
+    Fallback is { mode (auto, rcs_only, sms_only), channel (auto, sms, mms), from,
+    content: { text, mediaUrls }, validitySeconds }; without content the
+    template's fallback, else a generated one, is used. Simulate: not_capable |
+    ttl_expired | delivered | read, approved testers only.
+    Required: AgentID, Recipients
+    Returns: { requested, enqueued, failed, bulkId, messages } (201)
+
+  Validate(ctx, SendRcsMessageParams{...}, *RequestOptions) (*Response, error)
+    POST /message/rcs/validate. Check a send; writes nothing. Takes the same
+    arguments as Send. Required: AgentID, Recipients
+    Returns: { valid, errors, warnings, billingClass, segments,
+    estimatedCostMicros, unsupportedFiles, recipients }. It runs a send's
+    checks and holds no funds. valid is true only with no errors.
+
+  Estimate(ctx, EstimateRcsMessageParams{AgentID, Recipients, RecipientCount,
+      TemplateID, TemplateVersion, Content, ContentFormat, TrafficType,
+      TTLSeconds, ExpireTime, Fallback}, *RequestOptions) (*Response, error)
+    POST /message/estimate with channel "rcs" added. Price a draft in
+    microdollars; no charge or send. Exactly one of Recipients or
+    RecipientCount. The fallback's from is optional for an estimate; with
+    none, the fallback leg is priced on the channel of the agent's linked
+    campaign. Required: AgentID
+    Returns: { billingClass, segments, recipientCount, rcsLeg, fallbackLeg,
+    totals, balance, issues, warnings }
+    rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB,
+    already inside rcsLeg.cost; a message over 100 MB adds a MEDIA_TOO_LARGE
+    issue.
+
+  Capabilities(ctx, RcsCapabilitiesParams{AgentID, PhoneNumbers},
+      *RequestOptions) (*Response, error)
+    POST /rcs/capabilities. Report which numbers (up to 500) can receive RCS.
+    Required: AgentID, PhoneNumbers
+    Returns: { results: [{ phoneNumber, capability }] }, capability being
+    ENABLED, UNREACHABLE or UNKNOWN
+
+  Get(ctx, GetRcsMessageParams{MessageID}, *RequestOptions) (*Response, error)
+    GET /message/:messageId. Get one message; the same route as
+    client.Messages.GetMessage. Required: MessageID
+
+  List(ctx, ListRcsMessagesParams{GroupID, From, To, AgentID, Status, Page,
+      Limit, TemplateID, TemplateVersion, BulkID, FallbackReason, BillingClass,
+      DeliveredChannel, IsTest}, *RequestOptions) (*Response, error)
+    GET /message with messageType=RCS. AgentID is sent as registrationId,
+    From as startDate and To as endDate. A fallback leg is an SMS or MMS
+    message: read it with client.Messages.GetMessage and the parent's
+    fallbackMessageId.
+    Required: GroupID, From, To
+
+  Set RequestOptions.IdempotencyKey on Send to make a retry safe (see IDEMPOTENT
+  REQUESTS).
 
 
 NOTIFICATIONS  (client.Notifications)
@@ -1112,7 +1191,7 @@ to every message from it, counted in segments and in the estimate.
 GET /registration accepts groupId, subgroupId, region, type, kind, status,
 parentRegistrationId, phoneNumber (filter to registrations holding this phone
 number), brandId and campaignId (BrandID / CampaignID: RCS agents linked to that
-10DLC brand or campaign), sortBy (createdAt (default), subgroupId, registrationId, region or
+brand or campaign), sortBy (createdAt (default), subgroupId, registrationId, region or
 status), sortOrder (asc or desc (default)), page and limit (max 100) and returns
 {data,totalCount,page,limit}.
 Region and Status each take one value or a comma-separated list (e.g.
@@ -1179,20 +1258,18 @@ shortCode and p2p; [] matches nothing and omitting both keeps the existing scope
 Example:
 [{"region":"US","channels":["tenDLC"],"brandId":["BUS1"]},
  {"region":"GB","channels":["virtualLongCode"],"phoneNumber":["447400123456"]}]
-GET /message always accepts them; the analytics and DNC reads accept them only
-where the environment serves hourly analytics and reject them with a 400 elsewhere.
+GET /message always accepts them, as do the analytics and DNC reads.
 
 GetAnalytics, GetAnalyticsDetail, GetAnalyticsThroughput and GetDncAnalytics
 accept RegistrationID (a single id or a comma-separated list, like CampaignID):
-filter to traffic attributed to these registrations (hourly analytics only; a 400
-while hourly reads are off). Except on GetAnalyticsThroughput, which has no
+filter to traffic attributed to these registrations. Except on GetAnalyticsThroughput, which has no
 phoneNumber filter, a phoneNumber filter takes precedence. GetPhoneNumbers
 accepts a single RegistrationID to list the numbers provisioned under that
 registration.
 
 GetAnalyticsBySubgroup, GetAnalyticsByErrorCode and GetDncRecords accept RegistrationID
-the same way, with the same hourly-only rule and precedence. GetMessages accepts
-RegistrationID in every environment: it filters to messages attributed to those
+the same way, with the same precedence. GetMessages accepts
+RegistrationID: it filters to messages attributed to those
 registrations, and a PhoneNumber filter narrows further. Every method returns 400 when
 RegistrationID is combined with CampaignID.
 

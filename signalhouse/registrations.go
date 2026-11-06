@@ -90,9 +90,9 @@ type GetRegistrationsParams struct {
 	ParentRegistrationID string
 	// PhoneNumber filters to registrations holding this phone number.
 	PhoneNumber string
-	// BrandID is for RCS agents only: filter to agents linked to this 10DLC brand (carrier ID, provisional UUID or _id).
+	// BrandID is for RCS agents only: filter to agents linked to this brand (carrier ID, provisional UUID or _id).
 	BrandID string
-	// CampaignID is for RCS agents only: filter to agents linked to this 10DLC campaign (campaign ID or _id).
+	// CampaignID is for RCS agents only: filter to agents linked to this campaign (campaign ID or _id).
 	CampaignID string
 	// SortBy is createdAt (default), subgroupId, registrationId, region or status.
 	SortBy string
@@ -205,6 +205,7 @@ type LaunchRegistrationParams struct {
 // returns it in SIGNAL_HOUSE_REVIEW, whose approval files the provider's launch request. Allowed while the provider
 // reports the agent ready for testing, after a Signal House rejection, or after every carrier refused an earlier launch
 // (409 otherwise); a failed requirement is a 400 whose details carry {code: "REGISTRATION_INCOMPLETE", errors, warnings}.
+// An RCS agent's launch request charges its launch fees: a wallet that cannot cover them gets a 402, and nothing changes.
 func (s *RegistrationsService) LaunchRegistration(ctx context.Context, params LaunchRegistrationParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"registrationId": params.RegistrationID}); err != nil {
 		return nil, err

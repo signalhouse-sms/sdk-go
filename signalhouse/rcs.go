@@ -9,21 +9,30 @@ import (
 	"reflect"
 )
 
-// RcsService groups RCS (Google RBM) resources. Access via client.Rcs.Agents. Templates for RCS live under
-// client.Templates.
+// RcsService groups RCS (Google RBM) resources. Access via client.Rcs.Agents and client.Rcs.Messages. Templates for RCS
+// live under client.Templates.
 type RcsService struct {
 	client *Client
 
 	// Agents — RCS agents under /rcs/agent.
 	Agents *RcsAgentsService
+	// Messages — RCS messages: send, validate, estimate, capabilities, get and list.
+	Messages *RcsMessagesService
 }
 
-// RcsAgentsService handles RCS agents under /rcs/agent. An agent links one 10DLC brand and one 10DLC campaign: the
-// campaign's numbers are the SMS fallback, and the brand and campaign supply the company identity and consent text
-// for the carrier launch. One brand or campaign can serve many agents. An agent is a registration (type RCS_AGENT,
+// RcsAgentsService handles RCS agents under /rcs/agent. An agent links one brand and one campaign, of any registration
+// type: the campaign's numbers are the SMS fallback, and the brand and campaign supply the company identity and consent
+// text for the carrier launch. One brand or campaign can serve many agents. An agent is a registration (type RCS_AGENT,
 // id RCSA…), so the registrations methods read and edit the same record. 404 while the environment's RCS switch is
 // off; 400 while the group's rcsEnabled flag is off.
 type RcsAgentsService struct {
+	client *Client
+}
+
+// RcsMessagesService handles RCS messages. Sends go through an agent to POST /message/rcs. A message is a Message record
+// (messageType RCS), so client.Messages reads the same record. 404 while the environment's RCS switch is off; 403 while
+// the group's rcsEnabled flag is off; 409 while the agent cannot send yet.
+type RcsMessagesService struct {
 	client *Client
 }
 
@@ -95,9 +104,9 @@ type RcsAgentFallback struct {
 
 // CreateRcsAgentParams are the parameters for the Create method.
 type CreateRcsAgentParams struct {
-	// BrandID is the 10DLC brand: carrier brand ID, provisional UUID or _id. Required.
+	// BrandID is the brand: carrier brand ID, provisional UUID or _id. Required.
 	BrandID string
-	// CampaignID is a 10DLC campaign of that brand (campaign ID or _id); required before submit. Empty omits it.
+	// CampaignID is a campaign of that brand (campaign ID or _id); required before submit. Empty omits it.
 	CampaignID string
 	// Agent is the profile: an RcsAgentProfile, *RcsAgentProfile or map[string]any. nil omits it.
 	Agent any
@@ -119,7 +128,7 @@ type CreateRcsAgentParams struct {
 	Testers []string
 }
 
-// Create creates an agent draft on a 10DLC brand, optionally with its campaign, and returns the agent (HTTP 201,
+// Create creates an agent draft on a brand, optionally with its campaign, and returns the agent (HTTP 201,
 // status DRAFT). The agent's subgroup is the brand's. Blank consent fields fill from the linked campaign. Set
 // RequestOptions.IdempotencyKey to make a retry safe.
 func (s *RcsAgentsService) Create(ctx context.Context, params CreateRcsAgentParams, opts *RequestOptions) (*Response, error) {
@@ -137,9 +146,9 @@ type ListRcsAgentsParams struct {
 	// Status is DRAFT, PENDING_REVIEW, REJECTED, AGENT_CREATING or ARCHIVED, one value or a comma-separated list
 	// (e.g. "DRAFT,REJECTED").
 	Status string
-	// BrandID returns agents linked to this 10DLC brand (carrier brand ID, provisional UUID or _id).
+	// BrandID returns agents linked to this brand (carrier brand ID, provisional UUID or _id).
 	BrandID string
-	// CampaignID returns agents linked to this 10DLC campaign (campaign ID or _id).
+	// CampaignID returns agents linked to this campaign (campaign ID or _id).
 	CampaignID string
 	// Page defaults to 1.
 	Page string
@@ -180,7 +189,7 @@ func (s *RcsAgentsService) Get(ctx context.Context, params RcsAgentParams, opts 
 type UpdateRcsAgentParams struct {
 	// AgentID is the agent ID. Required.
 	AgentID string
-	// BrandID relinks the agent to another 10DLC brand of the same subgroup.
+	// BrandID relinks the agent to another brand of the same subgroup.
 	BrandID string
 	// CampaignID links or relinks the campaign.
 	CampaignID string
@@ -245,6 +254,7 @@ func (s *RcsAgentsService) Submit(ctx context.Context, params RcsAgentParams, op
 // (status PENDING_REVIEW), whose approval files the launch with the carrier partner. Allowed from IN_TESTING, REJECTED
 // and CARRIER_REJECTED (409 otherwise); a failed requirement is a 400 whose details carry {code:
 // "REGISTRATION_INCOMPLETE", errors, warnings}. It sends POST /registration/:agentId/launch: the agent is a registration.
+// The request charges the agent's launch fees: a wallet that cannot cover them gets a 402, and the agent stays where it is. The agent's launchFees quotes what the next request charges.
 func (s *RcsAgentsService) Launch(ctx context.Context, params RcsAgentParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
 		return nil, err
@@ -301,6 +311,203 @@ func (s *RcsAgentsService) UploadAsset(ctx context.Context, params UploadRcsAgen
 		return nil, err
 	}
 	return s.client.doMultipart(ctx, "POST", path, writeForm, opts)
+}
+
+// SendRcsMessageParams are the parameters for the Send and Validate methods.
+type SendRcsMessageParams struct {
+	// AgentID is the agent that sends (RCSA…). Required.
+	AgentID string
+	// Recipients holds up to 100 recipients, each { phoneNumber, variables?, clientMessageId?, metadata? }. Required.
+	Recipients []map[string]any
+	// TemplateID is a template to send; exactly one of TemplateID or Content.
+	TemplateID string
+	// TemplateVersion is a published version of TemplateID; 0 omits it.
+	TemplateVersion int
+	// Content is inline content, as a map[string]any or json.RawMessage; exactly one of TemplateID or Content.
+	Content any
+	// ContentFormat is content.v1 (default) or google.rcs.
+	ContentFormat string
+	// TrafficType is AUTHENTICATION, TRANSACTION, SERVICEREQUEST, ACKNOWLEDGEMENT or PROMOTION; required on a MULTI_USE
+	// agent when the template sets none.
+	TrafficType string
+	// TTLSeconds is how long the RCS message may wait for delivery; at most one of TTLSeconds or ExpireTime. 0 omits it.
+	TTLSeconds int
+	// ExpireTime is the ISO-8601 time the RCS message expires.
+	ExpireTime string
+	// Fallback is { mode? (auto, rcs_only, sms_only), channel? (auto, sms, mms), from?, content?: { text, mediaUrls? },
+	// validitySeconds? }, as a map[string]any. from is a Ready number on the agent's linked Active campaign. If content is
+	// omitted the template's fallback, else a generated one, is used. nil omits it.
+	Fallback any
+	// StatusCallbackURL receives this message's status events.
+	StatusCallbackURL string
+	// EnableShortlink shortens the links in the message; nil omits it.
+	EnableShortlink *bool
+	// IsTest sends as a test, to approved testers only; nil omits it.
+	IsTest *bool
+	// Simulate is not_capable, ttl_expired, delivered or read; approved testers only.
+	Simulate string
+}
+
+// Send sends an RCS message to up to 100 recipients and returns { requested, enqueued, failed, bulkId,
+// messages } (HTTP 201). A check that blocks one recipient writes a BLOCKED message for it and the rest still send; its row
+// carries blockReason, reason and issues. An archived template answers 409 TEMPLATE_ARCHIVED. Set
+// RequestOptions.IdempotencyKey to make a retry safe.
+func (s *RcsMessagesService) Send(ctx context.Context, params SendRcsMessageParams, opts *RequestOptions) (*Response, error) {
+	body, err := rcsSendBody(params)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "POST", "/message/rcs", body, opts)
+}
+
+// Validate runs a send's checks without writing anything or holding funds. It returns { valid, errors, warnings,
+// billingClass, segments, estimatedCostMicros, unsupportedFiles, recipients }. valid is true only with no errors; each
+// blocked recipient adds an error and carries blockReason, reason and issues.
+func (s *RcsMessagesService) Validate(ctx context.Context, params SendRcsMessageParams, opts *RequestOptions) (*Response, error) {
+	body, err := rcsSendBody(params)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "POST", "/message/rcs/validate", body, opts)
+}
+
+// EstimateRcsMessageParams are the parameters for the Estimate method.
+type EstimateRcsMessageParams struct {
+	// AgentID is the agent that would send (RCSA…). Required.
+	AgentID string
+	// Recipients are named recipients; exactly one of Recipients or RecipientCount.
+	Recipients []map[string]any
+	// RecipientCount is a recipient count; carriers are unknown, so the default fees apply. 0 omits it.
+	RecipientCount int
+	// TemplateID is a template to price; exactly one of TemplateID or Content.
+	TemplateID string
+	// TemplateVersion is a published version of TemplateID; 0 omits it.
+	TemplateVersion int
+	// Content is inline content, as a map[string]any or json.RawMessage; exactly one of TemplateID or Content.
+	Content any
+	// ContentFormat is content.v1 (default) or google.rcs.
+	ContentFormat string
+	// TrafficType is as on SendRcsMessageParams.
+	TrafficType string
+	// TTLSeconds is how long the RCS message may wait for delivery; at most one of TTLSeconds or ExpireTime. 0 omits it.
+	TTLSeconds int
+	// ExpireTime is the ISO-8601 time the RCS message expires.
+	ExpireTime string
+	// Fallback is as on SendRcsMessageParams, but its from is optional: with none, the leg is priced on the channel of the
+	// agent's linked campaign. nil omits it.
+	Fallback any
+}
+
+// Estimate prices an RCS draft in microdollars and returns { billingClass, segments, recipientCount, rcsLeg, fallbackLeg,
+// totals, balance, issues, warnings }; it never sends or charges. Sends POST /message/estimate with channel "rcs". The fallback's from is
+// optional for an estimate: with none, the fallback leg is priced on the channel of the agent's linked campaign.
+// rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB, already inside rcsLeg.cost; a message over 100 MB adds a MEDIA_TOO_LARGE issue.
+func (s *RcsMessagesService) Estimate(ctx context.Context, params EstimateRcsMessageParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
+		return nil, err
+	}
+	body := map[string]any{"channel": "rcs", "agentId": params.AgentID}
+	if params.Recipients != nil {
+		body["recipients"] = params.Recipients
+	}
+	setInt(body, "recipientCount", params.RecipientCount)
+	setString(body, "templateId", params.TemplateID)
+	setInt(body, "templateVersion", params.TemplateVersion)
+	setAny(body, "content", params.Content)
+	setString(body, "contentFormat", params.ContentFormat)
+	setString(body, "trafficType", params.TrafficType)
+	setInt(body, "ttlSeconds", params.TTLSeconds)
+	setString(body, "expireTime", params.ExpireTime)
+	setAny(body, "fallback", params.Fallback)
+	return s.client.doJSON(ctx, "POST", "/message/estimate", body, opts)
+}
+
+// RcsCapabilitiesParams are the parameters for the Capabilities method.
+type RcsCapabilitiesParams struct {
+	// AgentID is the agent (RCSA…). Required.
+	AgentID string
+	// PhoneNumbers holds up to 500 numbers, 10-15 digits, with or without the +. Required.
+	PhoneNumbers []string
+}
+
+// Capabilities reports which numbers can receive RCS from an agent as { results: [{ phoneNumber, capability }] },
+// capability being ENABLED, UNREACHABLE or UNKNOWN.
+func (s *RcsMessagesService) Capabilities(ctx context.Context, params RcsCapabilitiesParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
+		return nil, err
+	}
+	if len(params.PhoneNumbers) == 0 {
+		return nil, &ValidationError{Field: "phoneNumbers"}
+	}
+	return s.client.doJSON(ctx, "POST", "/rcs/capabilities", map[string]any{"agentId": params.AgentID, "phoneNumbers": params.PhoneNumbers}, opts)
+}
+
+// GetRcsMessageParams are the parameters for the Get method.
+type GetRcsMessageParams struct {
+	// MessageID is the message ID. Required.
+	MessageID string
+}
+
+// Get returns one message by its ID; an unknown ID is a 404. The same route as client.Messages.GetMessage.
+func (s *RcsMessagesService) Get(ctx context.Context, params GetRcsMessageParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"messageId": params.MessageID}); err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "GET", "/message/"+url.PathEscape(params.MessageID), nil, opts)
+}
+
+// ListRcsMessagesParams are the parameters for the List method.
+type ListRcsMessagesParams struct {
+	// AgentID returns messages this agent sent; sent as registrationId.
+	AgentID string
+	// From is an ISO-8601 date or timestamp; sent as startDate. Required.
+	From string
+	// To is an ISO-8601 date or timestamp; sent as endDate. Required.
+	To string
+	// GroupID is the group whose messages to list. Required.
+	GroupID string
+	// Status is ENQUEUED, DEQUEUED, SENT, FAILED, DELIVERED, READ, EXPIRED, FALLBACK or BLOCKED.
+	Status          string
+	Page            string
+	Limit           string
+	TemplateID      string
+	TemplateVersion string
+	// BulkID returns the messages of one send.
+	BulkID string
+	// FallbackReason is NOT_CAPABLE, CARRIER_NOT_LAUNCHED, TTL_EXPIRED, RCS_ERROR, PROVIDER_ERROR or SMS_ONLY.
+	FallbackReason string
+	// BillingClass is RICH or RICH_MEDIA.
+	BillingClass string
+	// DeliveredChannel is the channel that delivered the message: rcs, sms or mms.
+	DeliveredChannel string
+	// IsTest set to true returns test messages only, and to false leaves them out. nil omits it.
+	IsTest *bool
+}
+
+// List lists RCS messages. Sends GET /message with messageType RCS. A fallback leg is an SMS or MMS message: read it
+// with client.Messages.GetMessage and the parent's fallbackMessageId.
+func (s *RcsMessagesService) List(ctx context.Context, params ListRcsMessagesParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": params.GroupID, "from": params.From, "to": params.To}); err != nil {
+		return nil, err
+	}
+	qs := buildQueryString(map[string]string{
+		"registrationId":   params.AgentID,
+		"startDate":        params.From,
+		"endDate":          params.To,
+		"groupId":          params.GroupID,
+		"status":           params.Status,
+		"page":             params.Page,
+		"limit":            params.Limit,
+		"templateId":       params.TemplateID,
+		"templateVersion":  params.TemplateVersion,
+		"bulkId":           params.BulkID,
+		"fallbackReason":   params.FallbackReason,
+		"billingClass":     params.BillingClass,
+		"deliveredChannel": params.DeliveredChannel,
+		"isTest":           boolQueryValue(params.IsTest),
+		"messageType":      "RCS",
+	})
+	return s.client.doJSON(ctx, "GET", "/message"+qs, nil, opts)
 }
 
 // rcsAgentPath validates agentID and returns /rcs/agent/{agentID}{suffix} with the ID escaped.
@@ -386,9 +593,40 @@ func rcsAgentAssetForm(params UploadRcsAgentAssetParams) (string, func(w *multip
 	}, nil
 }
 
+// rcsSendBody validates a send and builds its JSON body.
+func rcsSendBody(params SendRcsMessageParams) (map[string]any, error) {
+	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
+		return nil, err
+	}
+	if len(params.Recipients) == 0 {
+		return nil, &ValidationError{Field: "recipients"}
+	}
+	body := map[string]any{"agentId": params.AgentID, "recipients": params.Recipients}
+	setString(body, "templateId", params.TemplateID)
+	setInt(body, "templateVersion", params.TemplateVersion)
+	setAny(body, "content", params.Content)
+	setString(body, "contentFormat", params.ContentFormat)
+	setString(body, "trafficType", params.TrafficType)
+	setInt(body, "ttlSeconds", params.TTLSeconds)
+	setString(body, "expireTime", params.ExpireTime)
+	setAny(body, "fallback", params.Fallback)
+	setString(body, "statusCallbackUrl", params.StatusCallbackURL)
+	setAny(body, "enableShortlink", params.EnableShortlink)
+	setAny(body, "isTest", params.IsTest)
+	setString(body, "simulate", params.Simulate)
+	return body, nil
+}
+
 // setString sets body[key] when value is non-empty.
 func setString(body map[string]any, key, value string) {
 	if value != "" {
+		body[key] = value
+	}
+}
+
+// setInt sets body[key] when value is non-zero.
+func setInt(body map[string]any, key string, value int) {
+	if value != 0 {
 		body[key] = value
 	}
 }
