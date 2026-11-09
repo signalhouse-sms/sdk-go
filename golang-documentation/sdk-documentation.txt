@@ -730,11 +730,13 @@ NUMBERS  (client.Numbers)
 --------------------------------------------------------------------------------
   GetPhoneNumbers(ctx, GetPhoneNumbersParams{PhoneNumber, CampaignID,
       RegistrationID, BrandID, SubgroupID, GroupID, Page, Limit,
-      CurrentTollFreeCarrier}, *RequestOptions) (*Response, error)
+      CurrentTollFreeCarrier, Released}, *RequestOptions) (*Response, error)
     List your phone numbers with filters.
     RegistrationID: filter to numbers provisioned under this registration.
     CurrentTollFreeCarrier (*bool): with GroupID or SubgroupID, true returns
     only the toll-free numbers a new toll-free campaign in that group can use.
+    Released (*bool): with SubgroupID or GroupID, true returns only its
+    released numbers (status RELEASED) instead of its active ones.
 
   GetNumberHealth(ctx, phoneNumber, *RequestOptions) (*Response, error)
     Get the health score, the same one the portal shows, (1–10) for an owned phone number.

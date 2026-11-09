@@ -36,6 +36,9 @@ type GetPhoneNumbersParams struct {
 	// CurrentTollFreeCarrier, when true with GroupID or SubgroupID, returns only the toll-free numbers a new toll-free
 	// campaign in that group can use.
 	CurrentTollFreeCarrier *bool
+	// Released, when true with SubgroupID or GroupID, returns only its released numbers (status RELEASED) instead of
+	// its active ones.
+	Released *bool
 }
 
 // GetPhoneNumbers returns a list of phone numbers with optional filters.
@@ -67,6 +70,7 @@ func (s *NumbersService) GetPhoneNumbers(ctx context.Context, params GetPhoneNum
 		"page":                   params.Page,
 		"limit":                  params.Limit,
 		"currentTollFreeCarrier": boolQueryValue(params.CurrentTollFreeCarrier),
+		"released":               boolQueryValue(params.Released),
 	})
 	return s.client.doJSON(ctx, "GET", "/number"+qs, nil, opts)
 }

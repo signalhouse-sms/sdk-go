@@ -452,6 +452,35 @@ func TestCurrentTollFreeCarrierFilter(t *testing.T) {
 	}
 }
 
+func TestReleasedNumbersFilter(t *testing.T) {
+	server, last := newCaptureServer(t)
+	client, err := NewClient(Config{APIKey: "test", BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	on, off := true, false
+
+	if _, err := client.Numbers.GetPhoneNumbers(ctx, GetPhoneNumbersParams{GroupID: "G1", Released: &on}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "GET" || last.uri != "/number?groupId=G1&released=true" {
+		t.Fatalf("released filter lost: %s %s", last.method, last.uri)
+	}
+	if _, err := client.Numbers.GetPhoneNumbers(ctx, GetPhoneNumbersParams{GroupID: "G1", Released: &off}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.uri != "/number?groupId=G1&released=false" {
+		t.Fatalf("explicit false lost: %s", last.uri)
+	}
+	if _, err := client.Numbers.GetPhoneNumbers(ctx, GetPhoneNumbersParams{GroupID: "G1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.uri != "/number?groupId=G1" {
+		t.Fatalf("unset filter sent: %s", last.uri)
+	}
+}
+
 func TestCreateTollFreeBrandSendsBusinessDetails(t *testing.T) {
 	server, last := newCaptureServer(t)
 	client, err := NewClient(Config{APIKey: "test", BaseURL: server.URL})

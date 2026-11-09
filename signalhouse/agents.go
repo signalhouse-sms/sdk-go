@@ -374,6 +374,10 @@ type UpsertAgentChannelSettingData struct {
 	// so a bare []string could never send [] and a caller who had set keyterms would have no way
 	// to clear them — an omitted field leaves the stored value unchanged.
 	Keyterms *[]string `json:"keyterms,omitempty"`
+	// AllowedCommitments, on the sms channel only, are the "a person will..." promises the agent
+	// may send on autopilot; any other promise is held for review. A non-empty list on webchat or
+	// voice is rejected. A pointer, like Keyterms and for the same reason: so [] can clear the list.
+	AllowedCommitments *[]AgentCommitment `json:"allowedCommitments,omitempty"`
 	// BackgroundSound is the ambient audio bed; nil = silence.
 	BackgroundSound *AgentBackgroundSound `json:"backgroundSound,omitempty"`
 	// Workflow is the conversation workflow graph, in the voice runtime's own shape: "nodes"
@@ -385,6 +389,15 @@ type UpsertAgentChannelSettingData struct {
 	// map[string]any could never send null and an agent that had a workflow could never have it
 	// removed. Point at a nil map to clear one; leave this nil to leave the stored graph alone.
 	Workflow *map[string]any `json:"workflow,omitempty"`
+}
+
+// AgentCommitment is one kind of promise an SMS agent may make on a person's behalf.
+type AgentCommitment struct {
+	// Kind is one of "confirm_booking", "call_back", "text_back", "follow_up", "hold_slot" or
+	// "send_reminder", each listed at most once.
+	Kind string `json:"kind"`
+	// Detail is an optional note shown to staff (up to 200 characters).
+	Detail *string `json:"detail,omitempty"`
 }
 
 // AgentBackgroundSound is an ambient audio bed played under a call. Preset names come from a
