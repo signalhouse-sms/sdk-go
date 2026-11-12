@@ -199,19 +199,39 @@ func (s *RegistrationsService) SubmitRegistration(ctx context.Context, params Su
 type LaunchRegistrationParams struct {
 	// RegistrationID is the registration ID (e.g. RCSA7K2M1QZ8RP). Required.
 	RegistrationID string
+	// AcknowledgeFees accepts the fees due; required when any are.
+	AcknowledgeFees bool
+	// AcknowledgePhi accepts the PHI disclosure; required for a healthcare or insurance brand.
+	AcknowledgePhi bool
+}
+
+// launchBody is a launch request's body: the acknowledgements the caller set, or nothing when there are none.
+func launchBody(acknowledgeFees, acknowledgePhi bool) any {
+	body := map[string]any{}
+	if acknowledgeFees {
+		body["acknowledgeFees"] = true
+	}
+	if acknowledgePhi {
+		body["acknowledgePhi"] = true
+	}
+	if len(body) == 0 {
+		return nil
+	}
+	return body
 }
 
 // LaunchRegistration requests the launch of a registration the provider already holds (an RCS agent in testing) and
 // returns it in SIGNAL_HOUSE_REVIEW, whose approval files the provider's launch request. Allowed while the provider
 // reports the agent ready for testing, after a Signal House rejection, or after every carrier refused an earlier launch
 // (409 otherwise); a failed requirement is a 400 whose details carry {code: "REGISTRATION_INCOMPLETE", errors, warnings}.
-// An RCS agent's launch request charges its launch fees: a wallet that cannot cover them gets a 402, and nothing changes.
+// An RCS agent's launch request charges its launch fees: a wallet that cannot cover them gets a 402, and nothing changes. When any fee is due the request must set AcknowledgeFees, or it gets a 400 with code FEE_ACKNOWLEDGEMENT_REQUIRED and nothing is held; a launch with nothing due needs no acknowledgement.
+// When the agent's brand vertical is healthcare or insurance, the launch needs the protected health information (PHI) disclosure acknowledged: set AcknowledgePhi, or the request gets a 400 REGISTRATION_INCOMPLETE whose errors name consent.phiAcknowledgement. The API records the acknowledgement as consent.phiAcknowledgement {acknowledgedAt, acknowledgedBy} from the caller; the client sends only the boolean, and an agent update cannot set it. Once recorded, a later launch request needs no new acknowledgement.
 func (s *RegistrationsService) LaunchRegistration(ctx context.Context, params LaunchRegistrationParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"registrationId": params.RegistrationID}); err != nil {
 		return nil, err
 	}
 	path := fmt.Sprintf("/registration/%s/launch", url.PathEscape(params.RegistrationID))
-	return s.client.doJSON(ctx, "POST", path, nil, opts)
+	return s.client.doJSON(ctx, "POST", path, launchBody(params.AcknowledgeFees, params.AcknowledgePhi), opts)
 }
 
 // CancelRegistrationParams are the parameters for the CancelRegistration method.
@@ -261,8 +281,12 @@ type ReviewRegistrationParams struct {
 	RegistrationID string `json:"-"`
 	// Action is "APPROVE" (submits the registration to the provider) or "REJECT".
 	Action string `json:"action"`
-	// Reason says why the registration was rejected; required for "REJECT".
+	// Reason says why the registration was rejected; required for "REJECT". An RCS agent takes 10 to 256 characters.
 	Reason string `json:"reason,omitempty"`
+	// ReasonCode is the rejection catalogue code; required to reject an RCS agent, refused for any other type.
+	ReasonCode string `json:"reasonCode,omitempty"`
+	// RejectionReasons lists field-level reasons for an RCS agent: maps of field, code, reason and recommendedAction.
+	RejectionReasons []map[string]any `json:"rejectionReasons,omitempty"`
 }
 
 // ReviewRegistration approves or rejects a registration awaiting Signal House review. Admin only.

@@ -117,7 +117,9 @@ type PublishTemplateParams struct {
 
 // Publish publishes the current draft and returns {head, version, warnings}. An incomplete draft is a 400
 // TEMPLATE_INVALID carrying errors and warnings; no draft is a 409 NO_DRAFT, and a draft that changed while it
-// was being published is a 409 DRAFT_CHANGED (publish again).
+// was being published is a 409 DRAFT_CHANGED (publish again). A block whose text or image the Moderation API flags
+// is an error with code CONTENT_POLICY_FLAGGED, whose message names the category ("Content moderation flagged this
+// text: spam"). The check passes when the Moderation API fails.
 func (s *TemplatesService) Publish(ctx context.Context, params PublishTemplateParams, opts *RequestOptions) (*Response, error) {
 	body, err := templatePublishBody(params)
 	if err != nil {
@@ -172,7 +174,8 @@ type ValidateTemplateParams struct {
 }
 
 // Validate validates a body or a stored version without writing and returns {valid, contentHash,
-// validatorVersion, errors, warnings}.
+// validatorVersion, errors, warnings}. The publish checks run, CONTENT_POLICY_FLAGGED included; saving a draft does
+// not run that check.
 func (s *TemplatesService) Validate(ctx context.Context, params ValidateTemplateParams, opts *RequestOptions) (*Response, error) {
 	body, err := templateValidateBody(params)
 	if err != nil {

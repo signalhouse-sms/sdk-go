@@ -211,6 +211,17 @@ func TestRegistrationTransport(t *testing.T) {
 	if last.body["reason"] != "Not a business use case" {
 		t.Fatalf("reject reason lost: %v", last.body)
 	}
+	if _, present := last.body["reasonCode"]; present {
+		t.Fatal("empty reasonCode must be omitted")
+	}
+	rcsRejection := ReviewRegistrationParams{RegistrationID: "RCSA1", Action: "REJECT", Reason: "Consent is too narrow", ReasonCode: "OPT_IN_SCOPE",
+		RejectionReasons: []map[string]any{{"code": "OPT_IN_SCOPE", "reason": "Promotions are not covered"}}}
+	if _, err := admin.ReviewRegistration(ctx, rcsRejection, nil); err != nil {
+		t.Fatal(err)
+	}
+	if reasons, ok := last.body["rejectionReasons"].([]interface{}); last.body["reasonCode"] != "OPT_IN_SCOPE" || !ok || len(reasons) != 1 {
+		t.Fatalf("RCS rejection lost: %v", last.body)
+	}
 	if _, err := admin.CorrectRegistration(ctx, CorrectRegistrationParams{RegistrationID: "REG1", Reason: "Provider asked", Data: map[string]any{"useCases": []string{"Support"}}}, nil); err != nil {
 		t.Fatal(err)
 	}

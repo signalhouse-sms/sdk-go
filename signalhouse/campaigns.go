@@ -116,10 +116,12 @@ type GetCampaignThroughputLimitsParams struct {
 //
 // Response: { campaignId, brandId, usecase, brand: { status, brandScore, entityType }, att: { tier,
 // scope, unit, sms: { limit }, mms: { limit }, marginPercent, nextTier }, tmobile: { tier, scope,
-// unit, dailyLimit, thresholds, nextTier, usedToday: { date, segments, resetsAt } | null } }. A null
-// tier/limit means the carrier ladder does not apply (unverified brand, GOVERNMENT entity,
-// PUBLIC_SAFETY_RESTRICTED usecase); a null nextTier means the top rung or a usecase-capped
-// (LOW_VOLUME) campaign.
+// unit, dailyLimit, thresholds, nextTier, usedToday: { date, segments, resetsAt } | null,
+// sharedWith: [{ brandId, brandName }] } }. A null tier/limit means the carrier ladder does not
+// apply (unverified brand, GOVERNMENT entity, PUBLIC_SAFETY_RESTRICTED usecase); a null nextTier
+// means the top rung or a usecase-capped (LOW_VOLUME) campaign. T-Mobile's counter is keyed per
+// brand EIN, not per brand: sharedWith lists other verified brands in the same group that share
+// this EIN and also carry a T-Mobile limit, since usedToday is their combined total.
 func (s *CampaignsService) GetCampaignThroughputLimits(ctx context.Context, params GetCampaignThroughputLimitsParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"campaignId": params.CampaignID}); err != nil {
 		return nil, err
@@ -137,8 +139,8 @@ type GetGroupThroughputUsageParams struct {
 // GetGroupThroughputUsage returns today's T-Mobile usage against the daily limit for every active campaign in a group that has one: the same limits and counter as
 // GetCampaignThroughputLimits, for the whole group in one call.
 //
-// Response: [{ campaignId, brandId, brandName, usecase, tmobile: { tier, dailyLimit, usedToday: { date, segments, resetsAt } } }].
-// Campaigns without a T-Mobile limit (unverified brand, GOVERNMENT entity, PUBLIC_SAFETY_RESTRICTED usecase) are left out. The counter is per brand EIN and UTC day, so every campaign of a brand shows the same usage; a LOW_VOLUME campaign's limit is 2,000 whatever the brand's score.
+// Response: [{ campaignId, brandId, brandName, usecase, tmobile: { tier, dailyLimit, usedToday: { date, segments, resetsAt }, sharedWith: [{ brandId, brandName }] } }].
+// Campaigns without a T-Mobile limit (unverified brand, GOVERNMENT entity, PUBLIC_SAFETY_RESTRICTED usecase) are left out. The counter is per brand EIN and UTC day, so every campaign of a brand shows the same usage; a LOW_VOLUME campaign's limit is 2,000 whatever the brand's score. sharedWith lists this brand's other group brands on the same EIN that also carry a T-Mobile limit, since usedToday is their combined total.
 func (s *CampaignsService) GetGroupThroughputUsage(ctx context.Context, params GetGroupThroughputUsageParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"groupId": params.GroupID}); err != nil {
 		return nil, err

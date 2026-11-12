@@ -17,6 +17,7 @@ type GetWebhooksParams struct {
 	GroupID      string
 	EndpointType string
 	PhoneNumber  string
+	AgentID      string
 	Page         string
 	Limit        string
 }
@@ -29,6 +30,7 @@ func (s *WebhooksService) GetWebhooks(ctx context.Context, params GetWebhooksPar
 		"groupId":      params.GroupID,
 		"endpointType": params.EndpointType,
 		"phoneNumber":  params.PhoneNumber,
+		"agentId":      params.AgentID,
 		"page":         params.Page,
 		"limit":        params.Limit,
 	})
@@ -52,6 +54,10 @@ type CreateWebhookParams struct {
 // and "CAMPAIGN_HEALTH_BELOW_THRESHOLD" each take {"threshold": n}, the 7-day health score (1.5–10, in 0.5
 // steps) below which the event fires. A subscribed health event without a threshold is stored with the
 // default, 6.
+//
+// WebhookData "endpointType" is "Global", "Number" or "Agent". An "Agent" endpoint receives one RCS agent's
+// events only: it needs "agentId", and may set "secondaryUrl", which gets one try when every attempt to
+// "url" fails.
 func (s *WebhooksService) CreateWebhook(ctx context.Context, params CreateWebhookParams, opts *RequestOptions) (*Response, error) {
 	if err := requireNonNil(map[string]interface{}{"webhookData": params.WebhookData}); err != nil {
 		return nil, err
@@ -74,6 +80,8 @@ type UpdateWebhookParams struct {
 // UpdateData "eventSettings" changes per-event options by event name ("NUMBER_HEALTH_BELOW_THRESHOLD",
 // "CAMPAIGN_HEALTH_BELOW_THRESHOLD", each {"threshold": n}, 1.5–10 in 0.5 steps); events you omit keep
 // their stored settings.
+//
+// UpdateData "secondaryUrl" changes an "Agent" endpoint's secondary URL, and nil clears it.
 func (s *WebhooksService) UpdateWebhook(ctx context.Context, params UpdateWebhookParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"id": params.ID}); err != nil {
 		return nil, err

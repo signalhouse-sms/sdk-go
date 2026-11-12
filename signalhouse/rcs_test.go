@@ -2,9 +2,14 @@ package signalhouse
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -63,6 +68,9 @@ func TestRcsAgentTransport(t *testing.T) {
 		}},
 		{"POST", "/rcs/agent/" + rcsAgentID + "/archive", func() (*Response, error) {
 			return agents.Archive(ctx, RcsAgentParams{AgentID: rcsAgentID}, nil)
+		}},
+		{"DELETE", "/rcs/agent/" + rcsAgentID + "/testers/15125550199", func() (*Response, error) {
+			return agents.RemoveTester(ctx, RemoveRcsTesterParams{AgentID: rcsAgentID, PhoneNumber: "15125550199"}, nil)
 		}},
 		{"POST", "/rcs/agent/" + rcsAgentID + "/testers/15125550199/resend", func() (*Response, error) {
 			return agents.ResendTesterInvite(ctx, ResendRcsTesterInviteParams{AgentID: rcsAgentID, PhoneNumber: "15125550199"}, nil)
@@ -163,6 +171,16 @@ func TestRcsMessageTransport(t *testing.T) {
 	if last.method != "POST" || last.uri != "/rcs/capabilities" || string(mustJSON(t, last.body)) != `{"agentId":"RCSA7K2M1QZ8RP","phoneNumbers":["+15125550199"]}` {
 		t.Fatalf("capabilities contract: %s %s %s", last.method, last.uri, mustJSON(t, last.body))
 	}
+	latitude, longitude := 30.26, -97.74
+	if _, err := messages.SimulateInbound(ctx, SimulateRcsInboundParams{AgentID: rcsAgentID, From: "+15125550199", Type: "LOCATION", Latitude: &latitude, Longitude: &longitude}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "POST" || last.uri != "/message/rcs/simulate-inbound" || string(mustJSON(t, last.body)) != `{"agentId":"RCSA7K2M1QZ8RP","from":"+15125550199","latitude":30.26,"longitude":-97.74,"type":"LOCATION"}` {
+		t.Fatalf("simulate contract: %s %s %s", last.method, last.uri, mustJSON(t, last.body))
+	}
+	if _, err := messages.SimulateInbound(ctx, SimulateRcsInboundParams{AgentID: rcsAgentID, Type: "TEXT"}, nil); err == nil {
+		t.Fatal("missing from must fail before transport")
+	}
 	if _, err := messages.Capabilities(ctx, RcsCapabilitiesParams{AgentID: rcsAgentID}, nil); err == nil || !strings.Contains(err.Error(), "phoneNumbers") {
 		t.Fatalf("missing phoneNumbers must fail before transport: %v", err)
 	}
@@ -194,7 +212,7 @@ func TestRcsMessageTransport(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if last.method != "GET" || last.uri != "/message?billingClass=RICH_MEDIA&bulkId=B1&deliveredChannel=sms&endDate=2026-11-02&fallbackReason=NOT_CAPABLE&groupId=G1&isTest=false&limit=50&messageType=RCS&page=2&registrationId="+rcsAgentID+"&startDate=2026-11-01&status=READ&templateId=T1&templateVersion=3" {
+	if last.method != "GET" || last.uri != "/message?billingClass=RICH_MEDIA&bulkId=B1&dateBounds=exact&deliveredChannel=sms&endDate=2026-11-02&fallbackReason=NOT_CAPABLE&groupId=G1&isTest=false&limit=50&messageType=RCS&page=2&registrationId="+rcsAgentID+"&startDate=2026-11-01&status=READ&templateId=T1&templateVersion=3" {
 		t.Fatalf("list contract: %s", last.uri)
 	}
 	last.uri = ""
@@ -307,6 +325,30 @@ func TestRegistrationDrafts(t *testing.T) {
 	if last.method != "POST" || last.uri != "/registration/"+rcsAgentID+"/launch" {
 		t.Fatalf("launch contract: %s %s", last.method, last.uri)
 	}
+	if _, err := reg.LaunchRegistration(ctx, LaunchRegistrationParams{RegistrationID: rcsAgentID, AcknowledgeFees: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if string(mustJSON(t, last.body)) != `{"acknowledgeFees":true}` {
+		t.Fatalf("launch body: %s", mustJSON(t, last.body))
+	}
+	if _, err := reg.LaunchRegistration(ctx, LaunchRegistrationParams{RegistrationID: rcsAgentID, AcknowledgeFees: true, AcknowledgePhi: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if string(mustJSON(t, last.body)) != `{"acknowledgeFees":true,"acknowledgePhi":true}` {
+		t.Fatalf("launch body with the PHI acknowledgement: %s", mustJSON(t, last.body))
+	}
+	if _, err := client.Rcs.Agents.Launch(ctx, RcsAgentParams{AgentID: rcsAgentID, AcknowledgeFees: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if string(mustJSON(t, last.body)) != `{"acknowledgeFees":true}` {
+		t.Fatalf("agent launch body: %s", mustJSON(t, last.body))
+	}
+	if _, err := client.Billing.GetTransactionHistory(ctx, GetTransactionHistoryParams{GroupID: "G1", Category: "RCS_INBOUND,RCS_CARRIER_PASSTHROUGH", Limit: "1000"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.uri != "/billing/wallet/transactionHistory?category=RCS_INBOUND%2CRCS_CARRIER_PASSTHROUGH&groupId=G1&limit=1000" {
+		t.Fatalf("history contract: %s", last.uri)
+	}
 	if _, err := reg.LaunchRegistration(ctx, LaunchRegistrationParams{}, nil); err == nil {
 		t.Fatal("missing registrationId must fail before transport")
 	}
@@ -321,5 +363,214 @@ func TestRegistrationDrafts(t *testing.T) {
 	}
 	if _, err := reg.SubmitRegistration(ctx, SubmitRegistrationParams{}, nil); err == nil {
 		t.Fatal("missing registrationId must fail before transport")
+	}
+}
+
+func TestAgentWebhookTransport(t *testing.T) {
+	server, last := newCaptureServer(t)
+	client, err := NewClient(Config{APIKey: "test", BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	if _, err := client.Webhooks.GetWebhooks(ctx, GetWebhooksParams{GroupID: "G1", EndpointType: "Agent", AgentID: rcsAgentID}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "GET" || last.uri != "/webhook?agentId="+rcsAgentID+"&endpointType=Agent&groupId=G1" {
+		t.Fatalf("agent filter: %s", last.uri)
+	}
+	webhookData := map[string]interface{}{"groupId": "G1", "endpointType": "Agent", "agentId": rcsAgentID, "url": "https://a.example/rcs", "secondaryUrl": "https://b.example/rcs"}
+	if _, err := client.Webhooks.CreateWebhook(ctx, CreateWebhookParams{WebhookData: webhookData}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if string(mustJSON(t, last.body)) != `{"agentId":"`+rcsAgentID+`","endpointType":"Agent","groupId":"G1","secondaryUrl":"https://b.example/rcs","url":"https://a.example/rcs"}` {
+		t.Fatalf("create body: %s", mustJSON(t, last.body))
+	}
+	if _, err := client.Webhooks.UpdateWebhook(ctx, UpdateWebhookParams{ID: "e1", UpdateData: map[string]interface{}{"secondaryUrl": nil}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if string(mustJSON(t, last.body)) != `{"secondaryUrl":null}` {
+		t.Fatalf("update body: %s", mustJSON(t, last.body))
+	}
+}
+
+func TestMessageInteractionsTransport(t *testing.T) {
+	server, last := newCaptureServer(t)
+	client, err := NewClient(Config{APIKey: "test", BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+
+	if _, err := client.Messages.GetMessageInteractions(ctx, GetMessageInteractionsParams{ID: "m1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "GET" || last.uri != "/message/m1/interactions" {
+		t.Fatalf("interactions contract: %s %s", last.method, last.uri)
+	}
+	if _, err := client.Messages.GetMessageInteractions(ctx, GetMessageInteractionsParams{}, nil); err == nil {
+		t.Fatal("missing id must fail before transport")
+	}
+}
+
+// fixtureInput reads one corpus case's input as Go parameter values.
+type fixtureInput map[string]any
+
+func (in fixtureInput) str(key string) string {
+	value, _ := in[key].(string)
+	return value
+}
+
+func (in fixtureInput) number(key string) int {
+	value, _ := in[key].(float64)
+	return int(value)
+}
+
+func (in fixtureInput) text(key string) string {
+	if value := in.number(key); value != 0 {
+		return strconv.Itoa(value)
+	}
+	return ""
+}
+
+func (in fixtureInput) flag(key string) *bool {
+	if value, ok := in[key].(bool); ok {
+		return &value
+	}
+	return nil
+}
+
+func (in fixtureInput) strs(key string) []string {
+	values, ok := in[key].([]any)
+	if !ok {
+		return nil
+	}
+	list := make([]string, len(values))
+	for index, value := range values {
+		list[index] = value.(string)
+	}
+	return list
+}
+
+func (in fixtureInput) recipients() []map[string]any {
+	values, _ := in["recipients"].([]any)
+	list := make([]map[string]any, len(values))
+	for index, value := range values {
+		list[index] = value.(map[string]any)
+	}
+	return list
+}
+
+func (in fixtureInput) send() SendRcsMessageParams {
+	return SendRcsMessageParams{
+		AgentID: in.str("agentId"), Recipients: in.recipients(), TemplateID: in.str("templateId"), TemplateVersion: in.number("templateVersion"), Content: in["content"],
+		ContentFormat: in.str("contentFormat"), TrafficType: in.str("trafficType"), TTLSeconds: in.number("ttlSeconds"), ExpireTime: in.str("expireTime"), Fallback: in["fallback"],
+		StatusCallbackURL: in.str("statusCallbackUrl"), EnableShortlink: in.flag("enableShortlink"), IsTest: in.flag("isTest"), Simulate: in.str("simulate"),
+	}
+}
+
+// runFixture calls the operation a corpus case names.
+func runFixture(ctx context.Context, client *Client, operation string, in fixtureInput) error {
+	agents, messages := client.Rcs.Agents, client.Rcs.Messages
+	agent := RcsAgentParams{AgentID: in.str("agentId")}
+	if acknowledgeFees := in.flag("acknowledgeFees"); acknowledgeFees != nil {
+		agent.AcknowledgeFees = *acknowledgeFees
+	}
+	if acknowledgePhi := in.flag("acknowledgePhi"); acknowledgePhi != nil {
+		agent.AcknowledgePhi = *acknowledgePhi
+	}
+	var err error
+	switch operation {
+	case "messages.send":
+		_, err = messages.Send(ctx, in.send(), nil)
+	case "messages.validate":
+		_, err = messages.Validate(ctx, in.send(), nil)
+	case "messages.estimate":
+		_, err = messages.Estimate(ctx, EstimateRcsMessageParams{AgentID: in.str("agentId"), RecipientCount: in.number("recipientCount"), Content: in["content"]}, nil)
+	case "messages.capabilities":
+		_, err = messages.Capabilities(ctx, RcsCapabilitiesParams{AgentID: in.str("agentId"), PhoneNumbers: in.strs("phoneNumbers")}, nil)
+	case "messages.get":
+		_, err = messages.Get(ctx, GetRcsMessageParams{MessageID: in.str("messageId")}, nil)
+	case "messages.list":
+		_, err = messages.List(ctx, ListRcsMessagesParams{GroupID: in.str("groupId"), From: in.str("from"), To: in.str("to"), AgentID: in.str("agentId"), Status: in.str("status"), Page: in.text("page"), Limit: in.text("limit")}, nil)
+	case "agents.create":
+		_, err = agents.Create(ctx, CreateRcsAgentParams{BrandID: in.str("brandId"), CampaignID: in.str("campaignId"), Agent: in["agent"], UseCase: in.str("useCase"), DefaultFallback: in["defaultFallback"], ExcludedCarriers: in.strs("excludedCarriers"), Testers: in.strs("testers")}, nil)
+	case "agents.list":
+		_, err = agents.List(ctx, ListRcsAgentsParams{Status: in.str("status"), BrandID: in.str("brandId"), Page: in.text("page"), Limit: in.text("limit")}, nil)
+	case "agents.get":
+		_, err = agents.Get(ctx, agent, nil)
+	case "agents.update":
+		_, err = agents.Update(ctx, UpdateRcsAgentParams{AgentID: in.str("agentId"), Agent: in["agent"], Testers: in.strs("testers")}, nil)
+	case "agents.validate":
+		_, err = agents.Validate(ctx, agent, nil)
+	case "agents.submit":
+		_, err = agents.Submit(ctx, agent, nil)
+	case "agents.launch":
+		_, err = agents.Launch(ctx, agent, nil)
+	case "agents.archive":
+		_, err = agents.Archive(ctx, agent, nil)
+	case "agents.resendTesterInvite":
+		_, err = agents.ResendTesterInvite(ctx, ResendRcsTesterInviteParams{AgentID: in.str("agentId"), PhoneNumber: in.str("phoneNumber")}, nil)
+	case "agents.removeTester":
+		_, err = agents.RemoveTester(ctx, RemoveRcsTesterParams{AgentID: in.str("agentId"), PhoneNumber: in.str("phoneNumber")}, nil)
+	default:
+		panic("no adapter for " + operation)
+	}
+	return err
+}
+
+func TestSharedFixtureCorpus(t *testing.T) {
+	raw, err := os.ReadFile("../../fixtures/rcs/requests.json")
+	if os.IsNotExist(err) {
+		t.Skip("the corpus lives in the monorepo")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus struct {
+		Cases []struct {
+			Name      string       `json:"name"`
+			Operation string       `json:"operation"`
+			Input     fixtureInput `json:"input"`
+			Request   struct {
+				Method string            `json:"method"`
+				Path   string            `json:"path"`
+				Query  map[string]string `json:"query"`
+				Body   map[string]any    `json:"body"`
+			} `json:"request"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	server, last := newCaptureServer(t)
+	client, err := NewClient(Config{APIKey: "test", BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range corpus.Cases {
+		t.Run(test.Name, func(t *testing.T) {
+			if err := runFixture(context.Background(), client, test.Operation, test.Input); err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := url.ParseRequestURI(last.uri)
+			if err != nil {
+				t.Fatal(err)
+			}
+			query := map[string]string{}
+			for key, values := range parsed.Query() {
+				query[key] = values[0]
+			}
+			if last.method != test.Request.Method || parsed.Path != test.Request.Path {
+				t.Fatalf("request: %s %s", last.method, last.uri)
+			}
+			if len(query)+len(test.Request.Query) > 0 && !reflect.DeepEqual(query, test.Request.Query) {
+				t.Fatalf("query: %v", query)
+			}
+			if len(last.body)+len(test.Request.Body) > 0 && !reflect.DeepEqual(last.body, test.Request.Body) {
+				t.Fatalf("body: %v", last.body)
+			}
+		})
 	}
 }

@@ -163,9 +163,16 @@ AUTH  (client.Auth)
 BILLING  (client.Billing)
 --------------------------------------------------------------------------------
   GetTransactionHistory(ctx, GetTransactionHistoryParams{GroupID, SubgroupID,
-      BrandID, CampaignID, EntryType, TransactionType, StartDate, EndDate},
+      BrandID, CampaignID, EntryType, TransactionType, StartDate, EndDate,
+      Category, Page, Limit},
       *RequestOptions) (*Response, error)
     Get transaction history with filters.
+    category: one RCS category or a comma-separated list: RCS_RICH_OUTBOUND,
+    RCS_RICH_MEDIA_OUTBOUND, RCS_INBOUND, RCS_ACTION_CLICK, RCS_MEDIA_SURCHARGE,
+    RCS_FEE_ONBOARDING, RCS_FEE_RENEWAL, RCS_SESSION_ADJUSTMENT or
+    RCS_SESSION_CARRIER_ADJUSTMENT;
+    RCS_CARRIER_PASSTHROUGH reads RCS carrier rows alone. Any other value is
+    rejected with a 400.
 
   GetWallet(ctx, GetWalletParams{GroupID},
       *RequestOptions) (*Response, error)
@@ -218,6 +225,24 @@ BRANDS  (client.Brands)
   CreateBrand(ctx, CreateBrandParams{BrandData},
       *RequestOptions) (*Response, error)
     Create a new 10DLC brand.
+
+  GetCallerName(ctx, GetBrandCallerNameParams{BrandID},
+      *RequestOptions) (*Response, error)
+    Read a brand's caller name (CNAM) and the numbers it applies to:
+    { brandId, companyName, cnamName, eligible, numbers: { total, items } }.
+    Roles: api, admin, developer, billing, user.
+
+  SetCallerName(ctx, SetBrandCallerNameParams{BrandID, Name},
+      *RequestOptions) (*Response, error)
+    Set a brand's caller name for every number whose caller name comes from
+    the brand, names set on a number included; later numbers get it too. The
+    name may only remove characters from the brand's registered name.
+    Roles: api, admin, developer.
+
+  DeleteCallerName(ctx, DeleteBrandCallerNameParams{BrandID},
+      *RequestOptions) (*Response, error)
+    Remove a brand's caller name; names set on a number are kept.
+    Roles: api, admin, developer.
 
   CreateTollFreeBrand(ctx, CreateTollFreeBrandParams{BrandData},
       *RequestOptions) (*Response, error)
@@ -428,6 +453,12 @@ MESSAGES  (client.Messages)
 
   GetMessage(ctx, GetMessageParams{ID}, *RequestOptions) (*Response, error)
     GET /message/:id. Get one message of any type. An unknown ID is a 404. Required: ID
+    An outbound RCS message and its fallback leg also carry costBreakdown,
+    { legs: [{ messageId, channel, billed, billingClass, segments, baseMicros,
+    carrierMicros, rated }] }, which is null when it cannot be computed.
+
+  GetMessageInteractions(ctx, GetMessageInteractionsParams{ID}, *RequestOptions) (*Response, error)
+    GET /message/:id/interactions. The taps on one RCS message, oldest first. Required: ID
 
   GetAnalytics(ctx, GetAnalyticsParams{GroupID, SubgroupID, BrandID,
       CampaignID, RegistrationID, PhoneNumber, Carrier, StartDate, EndDate},
@@ -512,6 +543,12 @@ TEMPLATES  (client.Templates)
     An incomplete draft is 400 {code: "TEMPLATE_INVALID", errors, warnings};
     no draft is 409 {code: "NO_DRAFT"}; a draft that changed while it was
     being published is 409 {code: "DRAFT_CHANGED"} (publish again).
+    Publish and Validate send each block's text and images to the Moderation
+    API. A flag is an error {severity: "error", code:
+    "CONTENT_POLICY_FLAGGED", path, message, blockId} whose message names the
+    category, for example "Content moderation flagged this text: spam". The
+    check passes when the Moderation API fails, and saving a draft does not
+    run it.
 
   Archive(ctx, ArchiveTemplateParams{TemplateID, GroupID},
       *RequestOptions) (*Response, error)
@@ -525,7 +562,8 @@ TEMPLATES  (client.Templates)
       Version}, *RequestOptions) (*Response, error)
     POST /template/:templateId/validate. Set exactly one of Body or
     Version (a numeric Version is sent as a number). Writes nothing; returns
-    {valid, contentHash, validatorVersion, errors, warnings}.
+    {valid, contentHash, validatorVersion, errors, warnings}. errors include
+    CONTENT_POLICY_FLAGGED, as on Publish.
 
   Capabilities(ctx, GetCapabilitiesParams{GroupID, Channel, Provider},
       *RequestOptions) (*Response, error)
@@ -563,7 +601,7 @@ RCS AGENTS  (client.Rcs.Agents)
   The agent: { agentId, groupId, subgroupId, status, registrationStatus,
   stage, brandId, brandRef, campaignId, campaignRef, links, agent, consent,
   useCase, billingCategory, defaultFallback, excludedCarriers, testers,
-  contact, testerInvites, carriers, launchable, review, submittedAt,
+  contact, testerInvites, carriers, launchable, review, redlineDiff, submittedAt,
   approvedAt, history,
   createdAt, updatedAt }. launchable is true
   when the launch request would be accepted now. brandRef and
@@ -572,7 +610,8 @@ RCS AGENTS  (client.Rcs.Agents)
   brand: { state: OK | NOT_VERIFIED | MISSING, ... }, campaign: { state: OK |
   NOT_ACTIVE | MISSING | NONE, ... } }; a deleted brand or campaign reads
   MISSING. status: DRAFT, PENDING_REVIEW, REJECTED, AGENT_CREATING (approved,
-  waiting for the carrier launch), ARCHIVED.
+  waiting for the carrier launch), ARCHIVE_PENDING (waiting for the carrier partner
+  to cancel it), ARCHIVED.
 
   Agent, Consent and DefaultFallback are typed any: pass an RcsAgentProfile,
   RcsAgentConsent or RcsAgentFallback (empty fields omitted), or a
@@ -613,26 +652,41 @@ RCS AGENTS  (client.Rcs.Agents)
   Submit(ctx, RcsAgentParams{AgentID}, *RequestOptions) (*Response, error)
     POST /rcs/agent/:agentId/submit. Create the agent at the carrier partner,
     with no review first. Needs the full profile, useCase and
-    NON_CONVERSATIONAL billing; otherwise 400 with details { code:
+    a billingCategory; otherwise 400 with details { code:
     "REGISTRATION_INCOMPLETE", errors, warnings }. The agent moves to
     AGENT_CREATING, then IN_TESTING once the partner reports it ready.
 
-  Launch(ctx, RcsAgentParams{AgentID}, *RequestOptions) (*Response, error)
+  Launch(ctx, RcsAgentParams{AgentID, AcknowledgeFees, AcknowledgePhi}, *RequestOptions) (*Response, error)
     POST /registration/:agentId/launch. Request the launch: the launch
     requirements are checked (a VERIFIED brand, the campaign, the full consent
     with the launch video, the contact) and the agent goes to PENDING_REVIEW;
     Signal House's approval files the launch with the carrier partner. Allowed
     from IN_TESTING, REJECTED and CARRIER_REJECTED (409 otherwise); a failed
     requirement is 400 REGISTRATION_INCOMPLETE.
+    When any fee is due the request needs AcknowledgeFees, or it gets a 400
+    with code FEE_ACKNOWLEDGEMENT_REQUIRED and nothing is held.
     The request charges the agent's launch fees: a wallet that cannot cover
     them gets a 402, and the agent stays where it is.
     The agent's launchFees quotes what the next request charges.
+    When the agent's brand vertical is healthcare or insurance, the launch
+    needs the protected health information (PHI) disclosure acknowledged: set
+    AcknowledgePhi, or the request gets a 400 REGISTRATION_INCOMPLETE whose
+    errors name consent.phiAcknowledgement. The API records the
+    acknowledgement as consent.phiAcknowledgement {acknowledgedAt,
+    acknowledgedBy} from the caller; the client sends only the boolean, and an
+    agent update cannot set it. Once recorded, a later launch request needs no
+    new acknowledgement.
 
   Archive(ctx, RcsAgentParams{AgentID}, *RequestOptions) (*Response, error)
     POST /rcs/agent/:agentId/archive. Archive the agent.
+    One the carrier partner created stops sending at once and stays ARCHIVE_PENDING until
+    Signal House confirms the partner cancelled it, then ARCHIVED. Archiving cannot be undone;
+    an agent already ARCHIVE_PENDING answers 409.
 
   ResendTesterInvite(ctx, ResendRcsTesterInviteParams{AgentID, PhoneNumber}, *RequestOptions) (*Response, error)
     POST /rcs/agent/:agentId/testers/:phoneNumber/resend. Resend a tester's expired invitation.
+  RemoveTester(ctx, RemoveRcsTesterParams{AgentID, PhoneNumber}, *RequestOptions) (*Response, error)
+    DELETE /rcs/agent/:agentId/testers/:phoneNumber. Remove a tester at once, at any point before the agent is archived.
 
   UploadAsset(ctx, UploadRcsAgentAssetParams{AgentID, Kind, File},
       *RequestOptions) (*Response, error)
@@ -665,6 +719,9 @@ RCS MESSAGES  (client.Rcs.Messages)
     ttl_expired | delivered | read, approved testers only.
     Required: AgentID, Recipients
     Returns: { requested, enqueued, failed, bulkId, messages } (201)
+    A recipient from 19999990000 to 19999990359 makes the whole request a
+    simulation, as on SMS: it returns { simulated: true, webhooks } and nothing
+    is stored, sent or charged.
 
   Validate(ctx, SendRcsMessageParams{...}, *RequestOptions) (*Response, error)
     POST /message/rcs/validate. Check a send; writes nothing. Takes the same
@@ -683,16 +740,29 @@ RCS MESSAGES  (client.Rcs.Messages)
     campaign. Required: AgentID
     Returns: { billingClass, segments, recipientCount, rcsLeg, fallbackLeg,
     totals, balance, issues, warnings }
-    rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB,
-    already inside rcsLeg.cost; a message over 100 MB adds a MEDIA_TOO_LARGE
+    rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB for one recipient, and rcsLeg.cost already holds it for every recipient; rcsLeg.cost is null with the fallback mode sms_only; a message over 100 MB adds a MEDIA_TOO_LARGE
     issue.
 
   Capabilities(ctx, RcsCapabilitiesParams{AgentID, PhoneNumbers},
       *RequestOptions) (*Response, error)
     POST /rcs/capabilities. Report which numbers (up to 500) can receive RCS.
     Required: AgentID, PhoneNumbers
-    Returns: { results: [{ phoneNumber, capability }] }, capability being
-    ENABLED, UNREACHABLE or UNKNOWN
+    Returns: { results: [{ phoneNumber, capability, rcsEnabled, reason, features,
+    carrier, checkedAt, cached }] }. capability is ENABLED, UNREACHABLE or
+    UNKNOWN; reason is CAPABLE, NOT_CAPABLE, NOT_LAUNCHED_ON_CARRIER or UNKNOWN.
+    rcsEnabled is true only for CAPABLE. carrier and checkedAt may be null, and
+    features is empty today.
+
+  SimulateInbound(ctx, SimulateRcsInboundParams{AgentID, From, Type, Text,
+      PostbackData, MessageID, ButtonID, Latitude, Longitude, FileName},
+      *RequestOptions) (*Response, error)
+    POST /message/rcs/simulate-inbound. Fake an inbound event from an approved
+    tester, with no carrier involved. It runs the real handlers and webhooks as
+    free test traffic; a simulated STOP really opts the tester out.
+    type: TEXT, SUGGESTION, LOCATION, FILE or UNSUBSCRIBE. TEXT needs text;
+    SUGGESTION needs the postback or button; LOCATION needs both coordinates.
+    Anyone else gets a 403 with code NOT_TESTER.
+    Returns: { status: "QUEUED", messageId }
 
   Get(ctx, GetRcsMessageParams{MessageID}, *RequestOptions) (*Response, error)
     GET /message/:messageId. Get one message; the same route as
@@ -767,7 +837,8 @@ NUMBERS  (client.Numbers)
 
   DeleteCallerName(ctx, DeleteCallerNameParams{PhoneNumber},
       *RequestOptions) (*Response, error)
-    Remove a number's own caller name (CNAM). Roles: api, admin, developer.
+    Remove a number's own caller name (CNAM); it falls back to the brand's
+    caller name, then auto-apply. Roles: api, admin, developer.
 
   AssignPhoneNumberToCampaign(ctx, AssignPhoneNumberToCampaignParams{
       CampaignID, PhoneNumbers}, *RequestOptions) (*Response, error)
@@ -910,13 +981,13 @@ USERS  (client.Users)
 
 WEBHOOKS  (client.Webhooks)
 --------------------------------------------------------------------------------
-  GetWebhooks(ctx, GetWebhooksParams{ID, GroupID, EndpointType, PhoneNumber,
+  GetWebhooks(ctx, GetWebhooksParams{ID, GroupID, EndpointType, PhoneNumber, AgentID,
       Page, Limit}, *RequestOptions) (*Response, error)
     List webhooks with filters.
 
   CreateWebhook(ctx, CreateWebhookParams{WebhookData},
       *RequestOptions) (*Response, error)
-    Create a new webhook.
+    Create a new webhook. An Agent endpoint takes agentId and an optional secondaryUrl.
 
   UpdateWebhook(ctx, UpdateWebhookParams{ID, UpdateData},
       *RequestOptions) (*Response, error)
@@ -1230,11 +1301,12 @@ SubmitRegistrationParams{RegistrationID}) sends POST
 or to SUBMITTING for a type Signal House does not review first (RCS_AGENT,
 filed with the provider at once) (400 REGISTRATION_INCOMPLETE with the errors,
 409 on a second submit). LaunchRegistration(ctx,
-LaunchRegistrationParams{RegistrationID}) sends POST
+LaunchRegistrationParams{RegistrationID, AcknowledgeFees, AcknowledgePhi}) sends POST
 /registration/:registrationId/launch: an RCS agent the carrier partner holds
 in testing goes to SIGNAL_HOUSE_REVIEW, whose approval files the launch (409
 unless the agent is in testing, Signal House rejected an earlier request, or
-every carrier refused one; 400 REGISTRATION_INCOMPLETE with the errors).
+every carrier refused one; 400 REGISTRATION_INCOMPLETE with the errors; a
+healthcare or insurance brand needs AcknowledgePhi, as on Rcs.Agents.Launch).
 
 Staff only (the admin namespace exists only when the client enables admin, and
 enabling it grants no server permission):
@@ -1318,6 +1390,7 @@ LANGUAGE EXAMPLE
   _, err = client.Registrations.SubmitRegistration(ctx, signalhouse.SubmitRegistrationParams{RegistrationID: "RCSA7K2M1QZ8RP"}, nil)
   _, err = client.Registrations.Admin.ReviewRegistration(ctx, // EnableAdmin: true
       signalhouse.ReviewRegistrationParams{RegistrationID: "REG1", Action: "APPROVE"}, nil)
+  // An RCS agent's rejection needs ReasonCode and a 10 to 256 character Reason; RejectionReasons is optional.
   _, err = client.Messages.GetMessages(ctx, signalhouse.GetMessagesParams{
       Region: "US,GB", RegionScopes: `[{"region":"GB","channels":["virtualLongCode"]}]`,
   }, nil)

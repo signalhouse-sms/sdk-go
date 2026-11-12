@@ -26,6 +26,10 @@ type GetTransactionHistoryParams struct {
 	TransactionType string
 	StartDate       string
 	EndDate         string
+	// Category is one category, or a comma-separated list: one of the RCS categories RCS_RICH_OUTBOUND, RCS_RICH_MEDIA_OUTBOUND, RCS_INBOUND, RCS_ACTION_CLICK, RCS_MEDIA_SURCHARGE, RCS_FEE_ONBOARDING, RCS_FEE_RENEWAL, RCS_SESSION_ADJUSTMENT or RCS_SESSION_CARRIER_ADJUSTMENT, or RCS_CARRIER_PASSTHROUGH for RCS carrier rows alone. Any other value is rejected with a 400.
+	Category string
+	Page     string
+	Limit    string
 }
 
 // GetTransactionHistory returns transaction history with optional filters.
@@ -39,6 +43,9 @@ func (s *BillingService) GetTransactionHistory(ctx context.Context, params GetTr
 		"transactionType": params.TransactionType,
 		"startDate":       params.StartDate,
 		"endDate":         params.EndDate,
+		"category":        params.Category,
+		"page":            params.Page,
+		"limit":           params.Limit,
 	})
 	return s.client.doJSON(ctx, "GET", "/billing/wallet/transactionHistory"+qs, nil, opts)
 }

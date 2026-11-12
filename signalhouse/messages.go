@@ -141,12 +141,28 @@ type GetMessageParams struct {
 	ID string
 }
 
-// GetMessage returns one message of any type by its ID; an unknown ID is a 404.
+// GetMessage returns one message of any type by its ID; an unknown ID is a 404. An outbound RCS message and its
+// fallback leg also carry costBreakdown, { legs: [{ messageId, channel, billed, billingClass, segments, baseMicros, carrierMicros, rated }] },
+// which is null when it cannot be computed.
 func (s *MessagesService) GetMessage(ctx context.Context, params GetMessageParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"id": params.ID}); err != nil {
 		return nil, err
 	}
 	return s.client.doJSON(ctx, "GET", "/message/"+url.PathEscape(params.ID), nil, opts)
+}
+
+// GetMessageInteractionsParams are the parameters for the GetMessageInteractions method.
+type GetMessageInteractionsParams struct {
+	// ID is the message ID. Required.
+	ID string
+}
+
+// GetMessageInteractions returns the taps on one RCS message, oldest first; an unknown ID is a 404.
+func (s *MessagesService) GetMessageInteractions(ctx context.Context, params GetMessageInteractionsParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"id": params.ID}); err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "GET", "/message/"+url.PathEscape(params.ID)+"/interactions", nil, opts)
 }
 
 // GetAnalyticsParams are the parameters for the GetAnalytics method.

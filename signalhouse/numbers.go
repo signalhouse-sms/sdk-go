@@ -245,6 +245,7 @@ type GetCallerNameParams struct {
 
 // GetCallerName reads a phone number's outbound caller name (CNAM) and whether one can be set.
 // Resolves to { phoneNumber, cnam, autoApply, eligible, ineligibleReason }.
+// cnam.source is MANUAL (set on the number), BRAND (the brand's caller name) or AUTO (subgroup auto-apply).
 // Roles: api, admin, developer, billing, user.
 // GET /number/{phoneNumber}/cnam
 func (s *NumbersService) GetCallerName(ctx context.Context, params GetCallerNameParams, opts *RequestOptions) (*Response, error) {
@@ -286,8 +287,9 @@ type DeleteCallerNameParams struct {
 	PhoneNumber string
 }
 
-// DeleteCallerName removes a phone number's own caller name (CNAM). If its subgroup has caller
-// name auto-apply on, the number goes back to the automatic name.
+// DeleteCallerName removes a phone number's own caller name (CNAM). The number goes back to its
+// brand's caller name if the brand has one, else to the automatic name if its subgroup has caller
+// name auto-apply on.
 // Resolves to { phoneNumber, cnam, autoApply, eligible, ineligibleReason }.
 // Roles: api, admin, developer.
 // DELETE /number/{phoneNumber}/cnam

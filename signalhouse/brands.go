@@ -34,6 +34,7 @@ type GetBrandsParams struct {
 
 // GetBrands returns a list of brands with optional filters. brandId may be null until carrier assignment.
 // Each brand carries `carrierSuspensions` (carrier brand suspension rules; active while liftedAt is null).
+// Each brand also carries `cnamName` (its caller name for numbers, or null; see GetCallerName).
 // Each toll-free brand carries `tollFree.reviewsBusinessOnSubmit`: whether it's reviewed when it's submitted and keeps
 // its business details from then on. When true it also carries `tollFree.businessStructure`, `tollFree.industry`,
 // `tollFree.contactEmail`, `tollFree.contactJobTitle`, `tollFree.contactJobLevel` and `tollFree.rejectionReason` (why
@@ -419,6 +420,70 @@ func (s *BrandsService) DeleteBrand(ctx context.Context, params DeleteBrandParam
 		return nil, err
 	}
 	path := fmt.Sprintf("/brand/%s", url.PathEscape(params.BrandID))
+	return s.client.doJSON(ctx, "DELETE", path, nil, opts)
+}
+
+// GetBrandCallerNameParams are the parameters for the BrandsService GetCallerName method.
+type GetBrandCallerNameParams struct {
+	// BrandID is the brand lookup id (carrier Brand ID, record _id, or internal reference).
+	BrandID string
+}
+
+// GetCallerName reads a brand's caller name (CNAM) and the numbers it applies to: every number whose
+// caller name comes from this brand (its campaign numbers, numbers it was picked on, and campaign-less
+// numbers of subgroups that use it as their default caller-ID brand).
+// Resolves to { brandId, companyName, cnamName, eligible, numbers: { total, items } }; items lists the first 100.
+// Roles: api, admin, developer, billing, user.
+// GET /brand/cnam/{brandId}
+func (s *BrandsService) GetCallerName(ctx context.Context, params GetBrandCallerNameParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"brandId": params.BrandID}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/brand/cnam/%s", url.PathEscape(params.BrandID))
+	return s.client.doJSON(ctx, "GET", path, nil, opts)
+}
+
+// SetBrandCallerNameParams are the parameters for the BrandsService SetCallerName method.
+type SetBrandCallerNameParams struct {
+	// BrandID is the brand lookup id (carrier Brand ID, record _id, or internal reference).
+	BrandID string `json:"-"`
+	// Name is the caller name to show. It may only remove characters from the brand's registered
+	// name, and must be 1-15 letters, digits, spaces, '-' or '_'.
+	Name string `json:"name"`
+}
+
+// SetCallerName sets a brand's caller name (CNAM). It replaces the caller name on every number whose
+// caller name comes from this brand, names set on a number included, and numbers that later come
+// under the brand get it too. The brand must be verified. Numbers are updated at the carrier in the
+// background.
+// Resolves to { brandId, companyName, cnamName, eligible, numbers: { total, items } }.
+// Roles: api, admin, developer.
+// PUT /brand/cnam/{brandId}
+func (s *BrandsService) SetCallerName(ctx context.Context, params SetBrandCallerNameParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"brandId": params.BrandID, "name": params.Name}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/brand/cnam/%s", url.PathEscape(params.BrandID))
+	return s.client.doJSON(ctx, "PUT", path, params, opts)
+}
+
+// DeleteBrandCallerNameParams are the parameters for the BrandsService DeleteCallerName method.
+type DeleteBrandCallerNameParams struct {
+	// BrandID is the brand lookup id (carrier Brand ID, record _id, or internal reference).
+	BrandID string
+}
+
+// DeleteCallerName removes a brand's caller name (CNAM). Numbers that had it go back to the automatic
+// name if their subgroup has caller name auto-apply on, otherwise to no caller name. Names set on a
+// number are kept.
+// Resolves to { brandId, companyName, cnamName, eligible, numbers: { total, items } }.
+// Roles: api, admin, developer.
+// DELETE /brand/cnam/{brandId}
+func (s *BrandsService) DeleteCallerName(ctx context.Context, params DeleteBrandCallerNameParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"brandId": params.BrandID}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/brand/cnam/%s", url.PathEscape(params.BrandID))
 	return s.client.doJSON(ctx, "DELETE", path, nil, opts)
 }
 

@@ -118,7 +118,7 @@ type CreateRcsAgentParams struct {
 	Contact any
 	// UseCase is OTP, TRANSACTIONAL, PROMOTIONAL or MULTI_USE; required before submit.
 	UseCase string
-	// BillingCategory is NON_CONVERSATIONAL (default) or CONVERSATIONAL; submit refuses CONVERSATIONAL.
+	// BillingCategory is NON_CONVERSATIONAL (default, per message) or CONVERSATIONAL (per interactive session).
 	BillingCategory string
 	// DefaultFallback is an RcsAgentFallback, *RcsAgentFallback or map[string]any. nil omits it.
 	DefaultFallback any
@@ -143,7 +143,7 @@ func (s *RcsAgentsService) Create(ctx context.Context, params CreateRcsAgentPara
 type ListRcsAgentsParams struct {
 	GroupID    string
 	SubgroupID string
-	// Status is DRAFT, PENDING_REVIEW, REJECTED, AGENT_CREATING or ARCHIVED, one value or a comma-separated list
+	// Status is DRAFT, PENDING_REVIEW, REJECTED, AGENT_CREATING, ARCHIVE_PENDING or ARCHIVED, one value or a comma-separated list
 	// (e.g. "DRAFT,REJECTED").
 	Status string
 	// BrandID returns agents linked to this brand (carrier brand ID, provisional UUID or _id).
@@ -174,6 +174,10 @@ func (s *RcsAgentsService) List(ctx context.Context, params ListRcsAgentsParams,
 type RcsAgentParams struct {
 	// AgentID is the agent ID (e.g. RCSA7K2M1QZ8RP). Required.
 	AgentID string
+	// AcknowledgeFees accepts the fees due on Launch; required when any are. Other methods ignore it.
+	AcknowledgeFees bool
+	// AcknowledgePhi accepts the PHI disclosure on Launch; required for a healthcare or insurance brand. Other methods ignore it.
+	AcknowledgePhi bool
 }
 
 // Get returns one agent with the live state of its brand and campaign links.
@@ -241,7 +245,7 @@ func (s *RcsAgentsService) Validate(ctx context.Context, params RcsAgentParams, 
 
 // Submit submits a draft: creates the agent at the carrier partner, and returns it (status
 // AGENT_CREATING, then IN_TESTING once the partner reports it ready). It needs the full profile, a use case and
-// NON_CONVERSATIONAL billing; otherwise a 400 whose details carry {code: "REGISTRATION_INCOMPLETE", errors, warnings}.
+// a billing category; otherwise a 400 whose details carry {code: "REGISTRATION_INCOMPLETE", errors, warnings}.
 func (s *RcsAgentsService) Submit(ctx context.Context, params RcsAgentParams, opts *RequestOptions) (*Response, error) {
 	path, err := rcsAgentPath(params.AgentID, "/submit")
 	if err != nil {
@@ -254,15 +258,18 @@ func (s *RcsAgentsService) Submit(ctx context.Context, params RcsAgentParams, op
 // (status PENDING_REVIEW), whose approval files the launch with the carrier partner. Allowed from IN_TESTING, REJECTED
 // and CARRIER_REJECTED (409 otherwise); a failed requirement is a 400 whose details carry {code:
 // "REGISTRATION_INCOMPLETE", errors, warnings}. It sends POST /registration/:agentId/launch: the agent is a registration.
-// The request charges the agent's launch fees: a wallet that cannot cover them gets a 402, and the agent stays where it is. The agent's launchFees quotes what the next request charges.
+// The request charges the agent's launch fees: a wallet that cannot cover them gets a 402, and the agent stays where it is. When any fee is due the request must set AcknowledgeFees, or it gets a 400 with code FEE_ACKNOWLEDGEMENT_REQUIRED and nothing is held; a launch with nothing due needs no acknowledgement. The agent's launchFees quotes what the next request charges.
+// When the agent's brand vertical is healthcare or insurance, the launch needs the protected health information (PHI) disclosure acknowledged: set AcknowledgePhi, or the request gets a 400 REGISTRATION_INCOMPLETE whose errors name consent.phiAcknowledgement. The API records the acknowledgement as consent.phiAcknowledgement {acknowledgedAt, acknowledgedBy} from the caller; the client sends only the boolean, and an agent update cannot set it. Once recorded, a later launch request needs no new acknowledgement.
 func (s *RcsAgentsService) Launch(ctx context.Context, params RcsAgentParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
 		return nil, err
 	}
-	return s.client.doJSON(ctx, "POST", fmt.Sprintf("/registration/%s/launch", url.PathEscape(params.AgentID)), nil, opts)
+	return s.client.doJSON(ctx, "POST", fmt.Sprintf("/registration/%s/launch", url.PathEscape(params.AgentID)), launchBody(params.AcknowledgeFees, params.AcknowledgePhi), opts)
 }
 
-// Archive archives an agent and returns it (status ARCHIVED).
+// Archive archives an agent and returns it (status ARCHIVE_PENDING or ARCHIVED). One the carrier partner created stops
+// sending at once and stays ARCHIVE_PENDING until Signal House confirms the partner cancelled it, then ARCHIVED.
+// Archiving cannot be undone; an agent already ARCHIVE_PENDING answers 409.
 func (s *RcsAgentsService) Archive(ctx context.Context, params RcsAgentParams, opts *RequestOptions) (*Response, error) {
 	path, err := rcsAgentPath(params.AgentID, "/archive")
 	if err != nil {
@@ -291,6 +298,27 @@ func (s *RcsAgentsService) ResendTesterInvite(ctx context.Context, params Resend
 		return nil, err
 	}
 	return s.client.doJSON(ctx, "POST", path, nil, opts)
+}
+
+// RemoveRcsTesterParams are the parameters for the RemoveTester method.
+type RemoveRcsTesterParams struct {
+	// AgentID is the agent ID. Required.
+	AgentID string
+	// PhoneNumber is the tester's US number, with or without the +. Required.
+	PhoneNumber string
+}
+
+// RemoveTester removes a tester at once, at any point before the agent is archived, and returns the agent. The number
+// must be a tester on the agent (404); an archived agent answers 409.
+func (s *RcsAgentsService) RemoveTester(ctx context.Context, params RemoveRcsTesterParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"phoneNumber": params.PhoneNumber}); err != nil {
+		return nil, err
+	}
+	path, err := rcsAgentPath(params.AgentID, "/testers/"+url.PathEscape(params.PhoneNumber))
+	if err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "DELETE", path, nil, opts)
 }
 
 // UploadRcsAgentAssetParams are the parameters for the UploadAsset method.
@@ -350,8 +378,9 @@ type SendRcsMessageParams struct {
 
 // Send sends an RCS message to up to 100 recipients and returns { requested, enqueued, failed, bulkId,
 // messages } (HTTP 201). A check that blocks one recipient writes a BLOCKED message for it and the rest still send; its row
-// carries blockReason, reason and issues. An archived template answers 409 TEMPLATE_ARCHIVED. Set
-// RequestOptions.IdempotencyKey to make a retry safe.
+// carries blockReason, reason and issues. An archived template answers 409 TEMPLATE_ARCHIVED. A recipient from 19999990000
+// to 19999990359 makes the whole request a simulation, as on SMS: it returns { simulated: true, webhooks } and nothing is
+// stored, sent or charged. Set RequestOptions.IdempotencyKey to make a retry safe.
 func (s *RcsMessagesService) Send(ctx context.Context, params SendRcsMessageParams, opts *RequestOptions) (*Response, error) {
 	body, err := rcsSendBody(params)
 	if err != nil {
@@ -401,7 +430,7 @@ type EstimateRcsMessageParams struct {
 // Estimate prices an RCS draft in microdollars and returns { billingClass, segments, recipientCount, rcsLeg, fallbackLeg,
 // totals, balance, issues, warnings }; it never sends or charges. Sends POST /message/estimate with channel "rcs". The fallback's from is
 // optional for an estimate: with none, the fallback leg is priced on the channel of the agent's linked campaign.
-// rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB, already inside rcsLeg.cost; a message over 100 MB adds a MEDIA_TOO_LARGE issue.
+// rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB for one recipient, and rcsLeg.cost already holds it for every recipient; rcsLeg.cost is null with the fallback mode sms_only; a message over 100 MB adds a MEDIA_TOO_LARGE issue.
 func (s *RcsMessagesService) Estimate(ctx context.Context, params EstimateRcsMessageParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
 		return nil, err
@@ -430,8 +459,8 @@ type RcsCapabilitiesParams struct {
 	PhoneNumbers []string
 }
 
-// Capabilities reports which numbers can receive RCS from an agent as { results: [{ phoneNumber, capability }] },
-// capability being ENABLED, UNREACHABLE or UNKNOWN.
+// Capabilities reports which numbers can receive RCS from an agent as { results: [{ phoneNumber, capability, rcsEnabled, reason, features, carrier, checkedAt, cached }] },
+// capability being ENABLED, UNREACHABLE or UNKNOWN, and reason CAPABLE, NOT_CAPABLE, NOT_LAUNCHED_ON_CARRIER or UNKNOWN; rcsEnabled is true only for CAPABLE, carrier and checkedAt may be null, and features is empty today.
 func (s *RcsMessagesService) Capabilities(ctx context.Context, params RcsCapabilitiesParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
 		return nil, err
@@ -440,6 +469,50 @@ func (s *RcsMessagesService) Capabilities(ctx context.Context, params RcsCapabil
 		return nil, &ValidationError{Field: "phoneNumbers"}
 	}
 	return s.client.doJSON(ctx, "POST", "/rcs/capabilities", map[string]any{"agentId": params.AgentID, "phoneNumbers": params.PhoneNumbers}, opts)
+}
+
+// SimulateRcsInboundParams are the parameters for the SimulateInbound method.
+type SimulateRcsInboundParams struct {
+	// AgentID is the agent (RCSA…). Required.
+	AgentID string
+	// From is the approved tester's number. Required.
+	From string
+	// Type is TEXT, SUGGESTION, LOCATION, FILE or UNSUBSCRIBE. Required.
+	Type string
+	// Text is the text; required for TEXT.
+	Text string
+	// PostbackData is the tapped suggestion's postback; SUGGESTION needs this or ButtonID.
+	PostbackData string
+	// MessageID is the message a tap answers; the latest message delivered to the tester by default.
+	MessageID string
+	// ButtonID is the suggestion's position, as webhooks report it.
+	ButtonID string
+	// Latitude is required for LOCATION.
+	Latitude *float64
+	// Longitude is required for LOCATION.
+	Longitude *float64
+	// FileName is the file's name, for FILE.
+	FileName string
+}
+
+// SimulateInbound fakes an inbound event. Fake an inbound event from an approved tester of the agent, with no carrier involved: it runs the real inbound handlers and webhooks, as free test traffic. A simulated STOP really opts the tester out; a simulated START clears it. Anyone else gets a 403 with code NOT_TESTER. Returns 202 with { status, messageId }.
+func (s *RcsMessagesService) SimulateInbound(ctx context.Context, params SimulateRcsInboundParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"agentId": params.AgentID, "from": params.From, "type": params.Type}); err != nil {
+		return nil, err
+	}
+	body := map[string]any{"agentId": params.AgentID, "from": params.From, "type": params.Type}
+	for key, value := range map[string]string{"text": params.Text, "postbackData": params.PostbackData, "messageId": params.MessageID, "buttonId": params.ButtonID, "fileName": params.FileName} {
+		if value != "" {
+			body[key] = value
+		}
+	}
+	if params.Latitude != nil {
+		body["latitude"] = *params.Latitude
+	}
+	if params.Longitude != nil {
+		body["longitude"] = *params.Longitude
+	}
+	return s.client.doJSON(ctx, "POST", "/message/rcs/simulate-inbound", body, opts)
 }
 
 // GetRcsMessageParams are the parameters for the Get method.
@@ -506,6 +579,7 @@ func (s *RcsMessagesService) List(ctx context.Context, params ListRcsMessagesPar
 		"deliveredChannel": params.DeliveredChannel,
 		"isTest":           boolQueryValue(params.IsTest),
 		"messageType":      "RCS",
+		"dateBounds":       "exact",
 	})
 	return s.client.doJSON(ctx, "GET", "/message"+qs, nil, opts)
 }
