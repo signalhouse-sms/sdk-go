@@ -456,6 +456,8 @@ MESSAGES  (client.Messages)
     An outbound RCS message and its fallback leg also carry costBreakdown,
     { legs: [{ messageId, channel, billed, billingClass, segments, baseMicros,
     carrierMicros, rated }] }, which is null when it cannot be computed.
+    A settled RCS message also carries carrierFeeMicros, the carrier
+    pass-through and media surcharge it was charged.
 
   GetMessageInteractions(ctx, GetMessageInteractionsParams{ID}, *RequestOptions) (*Response, error)
     GET /message/:id/interactions. The taps on one RCS message, oldest first. Required: ID
@@ -464,6 +466,23 @@ MESSAGES  (client.Messages)
       CampaignID, RegistrationID, PhoneNumber, Carrier, StartDate, EndDate},
       *RequestOptions) (*Response, error)
     Get aggregated message analytics.
+
+  GetConsentRecords(ctx, GetConsentRecordsParams{GroupID,
+      RecipientPhoneNumber, StartDate, EndDate, Page, Limit},
+      *RequestOptions) (*Response, error)
+    GET /message/dnc/consent-records. Export the group's consent ledger,
+    newest first: one append-only record per opt-out or opt-in a recipient
+    gave (a STOP or START keyword, or an opt-out link confirmation). It
+    records only; sends do not read it. Required: GroupID.
+    RecipientPhoneNumber filters to one handset (matched on its digits).
+    StartDate/EndDate filter occurredAt: a bare date is its whole UTC day,
+    a timestamp is bound as sent. Limit defaults to 100, max 500.
+    Returns: { data, total, page, limit }. Each record: groupId, subgroupId,
+    recipientPhoneNumber, phoneNumber (the business number or RCS agent id),
+    scope { type: CAMPAIGN|AGENT|SUBGROUP, id }, clearedScopes (for OPT_IN, every
+    { type, id } the START cleared; empty for OPT_OUT), action (OPT_OUT|OPT_IN),
+    source (KEYWORD|LINK), keyword, messageType (SMS|MMS|RCS), messageId,
+    actor { type: "RECIPIENT" }, occurredAt, createdAt.
 
   SendSMS(ctx, SendSMSParams{SenderPhoneNumber, RecipientPhoneNumbers,
       MessageBody, StatusCallbackURL, EnableShortlink},
@@ -601,7 +620,7 @@ RCS AGENTS  (client.Rcs.Agents)
   The agent: { agentId, groupId, subgroupId, status, registrationStatus,
   stage, brandId, brandRef, campaignId, campaignRef, links, agent, consent,
   useCase, billingCategory, defaultFallback, excludedCarriers, testers,
-  contact, testerInvites, carriers, launchable, review, redlineDiff, submittedAt,
+  contact, testerInvites, carriers, carrierUpdate, autofill, launchable, review, redlineDiff, submittedAt,
   approvedAt, history,
   createdAt, updatedAt }. launchable is true
   when the launch request would be accepted now. brandRef and
@@ -613,6 +632,19 @@ RCS AGENTS  (client.Rcs.Agents)
   waiting for the carrier launch), ARCHIVE_PENDING (waiting for the carrier partner
   to cancel it), ARCHIVED.
 
+  carrierUpdate is null, or { status: REQUESTED | SENT, carriers, requestedAt,
+  requestedBy, sentAt, sentBy }: the corrected launch answers the customer sent
+  to Signal House after a carrier rejected a launch other carriers took (status
+  PARTIALLY_LAUNCHED with a REJECTED carrier). In that state an update may
+  change only consent and contact, nothing is pushed to the carrier partner, and
+  RequestCarrierUpdate sends the update to Signal House, which emails it to the
+  carrier partner. autofill holds one marker per prefilled field, keyed by its
+  path (consent.optInDetails): { source: brand | campaign | landing, sourceId,
+  at, edited }. The API marks the fields it fills from the campaign or the
+  brand's landing page; send autofill on create or update for the fields you
+  prefilled. Omitted on update, the stored markers stay, and a marker turns
+  edited once its field changes.
+
   Agent, Consent and DefaultFallback are typed any: pass an RcsAgentProfile,
   RcsAgentConsent or RcsAgentFallback (empty fields omitted), or a
   map[string]any (a nil value sends null, which clears that field on
@@ -620,7 +652,7 @@ RCS AGENTS  (client.Rcs.Agents)
   empty non-nil slice is sent as [].
 
   Create(ctx, CreateRcsAgentParams{BrandID, CampaignID, Agent, Consent,
-      Contact, UseCase, BillingCategory, DefaultFallback, ExcludedCarriers, Testers},
+      Contact, UseCase, BillingCategory, DefaultFallback, ExcludedCarriers, Testers, Autofill},
       *RequestOptions) (*Response, error)
     POST /rcs/agent. Creates a draft (201). BrandID is a carrier brand ID,
     provisional UUID or _id; CampaignID (optional until submit) is a campaign
@@ -635,10 +667,12 @@ RCS AGENTS  (client.Rcs.Agents)
 
   Get(ctx, RcsAgentParams{AgentID}, *RequestOptions) (*Response, error)
     GET /rcs/agent/:agentId. One agent with the live state of its links.
+    googleAgentId is Google's id for the agent, null until Google has created
+    it.
 
   Update(ctx, UpdateRcsAgentParams{AgentID, BrandID, CampaignID,
       ClearCampaign, Agent, Consent, UseCase, ClearUseCase, BillingCategory,
-      DefaultFallback, ClearDefaultFallback, ExcludedCarriers, Testers, Contact},
+      DefaultFallback, ClearDefaultFallback, ExcludedCarriers, Testers, Contact, Autofill},
       *RequestOptions) (*Response, error)
     PUT /rcs/agent/:agentId. Edit a DRAFT or REJECTED agent. Agent and
     Consent merge field by field; other keys replace. ClearCampaign sends
@@ -655,6 +689,9 @@ RCS AGENTS  (client.Rcs.Agents)
     a billingCategory; otherwise 400 with details { code:
     "REGISTRATION_INCOMPLETE", errors, warnings }. The agent moves to
     AGENT_CREATING, then IN_TESTING once the partner reports it ready.
+    A group that has not finished account verification gets 403 with code
+    GROUP_UNVERIFIED, and a rejected group 403 with code GROUP_REJECTED; a
+    pending verification passes.
 
   Launch(ctx, RcsAgentParams{AgentID, AcknowledgeFees, AcknowledgePhi}, *RequestOptions) (*Response, error)
     POST /registration/:agentId/launch. Request the launch: the launch
@@ -663,6 +700,16 @@ RCS AGENTS  (client.Rcs.Agents)
     Signal House's approval files the launch with the carrier partner. Allowed
     from IN_TESTING, REJECTED and CARRIER_REJECTED (409 otherwise); a failed
     requirement is 400 REGISTRATION_INCOMPLETE.
+    The launch text must also pass the carriers' copy rules. Each failure is an
+    error whose code is the carrier partner's key:
+    OPT_IN_MSG_BRAND_NAME_MISSING, OPT_IN_MSG_FREQ_DISCL_MISSING,
+    OPT_IN_MSG_HELP_INSTR_MISSING, OPT_IN_MSG_RATE_DISCL_MISSING,
+    REG_BRAND_IN_OPT_IN_CONF_MESSAGE_MISSING, HELP_BRAND_NAME_MISSING,
+    HELP_SUPP_CONTACT_MISSING, OPT_OUT_BRAND_NAME_MISSING,
+    OPT_OUT_NO_CESSATION_CONF, SAMPLE_MSG_BRAND_NAME_MISSING,
+    SAMPLE_RATE_DISCL_MISSING, SAMPLE_HAS_PUBLIC_URL_SHORTENER. The brand-name
+    rules look for the brand's display name. 403 GROUP_UNVERIFIED and
+    GROUP_REJECTED as on submit.
     When any fee is due the request needs AcknowledgeFees, or it gets a 400
     with code FEE_ACKNOWLEDGEMENT_REQUIRED and nothing is held.
     The request charges the agent's launch fees: a wallet that cannot cover
@@ -677,6 +724,14 @@ RCS AGENTS  (client.Rcs.Agents)
     agent update cannot set it. Once recorded, a later launch request needs no
     new acknowledgement.
 
+  RequestCarrierUpdate(ctx, RcsAgentParams{AgentID}, *RequestOptions) (*Response, error)
+    POST /registration/:agentId/carrier-update. Send Signal House the corrected
+    launch answers after a carrier rejected a launch other carriers took; edit
+    consent and contact first. Returns the agent's registration with
+    data.carrierUpdate REQUESTED for the rejected carriers; it reads SENT once
+    Signal House sent it. 409 when no carrier is REJECTED after a partial
+    launch, or an update already waits.
+
   Archive(ctx, RcsAgentParams{AgentID}, *RequestOptions) (*Response, error)
     POST /rcs/agent/:agentId/archive. Archive the agent.
     One the carrier partner created stops sending at once and stays ARCHIVE_PENDING until
@@ -687,6 +742,19 @@ RCS AGENTS  (client.Rcs.Agents)
     POST /rcs/agent/:agentId/testers/:phoneNumber/resend. Resend a tester's expired invitation.
   RemoveTester(ctx, RemoveRcsTesterParams{AgentID, PhoneNumber}, *RequestOptions) (*Response, error)
     DELETE /rcs/agent/:agentId/testers/:phoneNumber. Remove a tester at once, at any point before the agent is archived.
+
+  CreateEntryPoints(ctx, CreateRcsEntryPointsParams{AgentID, Body},
+      *RequestOptions) (*Response, error)
+    POST /rcs/agent/:agentId/entry-points. Make the links that start a chat
+    with the agent: an sms: deep link in Google's format, and a short link
+    that redirects to it, for a QR code. With the agent's
+    defaultFallback.from, the deep link names that number, so a handset that
+    cannot reach the agent texts it. Body (optional, max 1,000 characters) is
+    the message the chat opens with. The same request returns the same short
+    link. The links reach approved testers until a carrier launches the agent.
+    409 with code GOOGLE_AGENT_PENDING before Google has created the agent.
+    Required: AgentID
+    Returns: { googleAgentId, deepLink, shortLink }
 
   UploadAsset(ctx, UploadRcsAgentAssetParams{AgentID, Kind, File},
       *RequestOptions) (*Response, error)
@@ -722,6 +790,20 @@ RCS MESSAGES  (client.Rcs.Messages)
     A recipient from 19999990000 to 19999990359 makes the whole request a
     simulation, as on SMS: it returns { simulated: true, webhooks } and nothing
     is stored, sent or charged.
+
+  SendBatch(ctx, SendRcsMessageParams{...}, *RequestOptions) (*Response, error)
+    POST /message/rcs/batch. Send to up to 10,000 recipients in the
+    background. Takes the same arguments as Send. The request runs the
+    send's request checks, splits the recipients into chunks of 100, queues
+    each chunk and answers 202. Every message carries the shared bulkId;
+    track progress with the messages list filtered by bulkId (GET
+    /message?bulkId=) and per-message webhooks. A chunk the wallet cannot
+    cover, or that is refused after acceptance, gets BLOCKED messages with
+    blockReason INSUFFICIENT_FUNDS or SEND_REFUSED; a chunk that keeps
+    failing gets SEND_FAILED. A retry with an idempotency key is safe (same
+    bulkId, no duplicate sends); a retry without one may send duplicates.
+    Required: AgentID, Recipients
+    Returns: { bulkId, status: "ACCEPTED", recipientCount } (202)
 
   Validate(ctx, SendRcsMessageParams{...}, *RequestOptions) (*Response, error)
     POST /message/rcs/validate. Check a send; writes nothing. Takes the same
@@ -766,7 +848,9 @@ RCS MESSAGES  (client.Rcs.Messages)
 
   Get(ctx, GetRcsMessageParams{MessageID}, *RequestOptions) (*Response, error)
     GET /message/:messageId. Get one message; the same route as
-    client.Messages.GetMessage. Required: MessageID
+    client.Messages.GetMessage. A settled RCS message carries
+    carrierFeeMicros, the carrier pass-through and media surcharge it was
+    charged. Required: MessageID
 
   List(ctx, ListRcsMessagesParams{GroupID, From, To, AgentID, Status, Page,
       Limit, TemplateID, TemplateVersion, BulkID, FallbackReason, BillingClass,
@@ -777,8 +861,8 @@ RCS MESSAGES  (client.Rcs.Messages)
     fallbackMessageId.
     Required: GroupID, From, To
 
-  Set RequestOptions.IdempotencyKey on Send to make a retry safe (see IDEMPOTENT
-  REQUESTS).
+  Set RequestOptions.IdempotencyKey on Send and SendBatch to make a retry safe
+  (see IDEMPOTENT REQUESTS).
 
 
 NOTIFICATIONS  (client.Notifications)
@@ -977,6 +1061,39 @@ USERS  (client.Users)
       UpdateNotificationPreferencesParams{ID, NotificationPreferences},
       *RequestOptions) (*Response, error)
     Update notification preferences.
+
+
+VERIFY  (client.Verify)
+--------------------------------------------------------------------------------
+  Carrier phone-number checks under /verify. Phone numbers are in international
+  format (e.g. "+12025550123"). Every check the carrier answers is billed to the
+  group's wallet (cost, in microdollars); 402 on insufficient funds. A check the
+  carrier cannot run for the number returns 422 and is not charged.
+
+  CheckSimSwap(ctx, CheckSimSwapParams{PhoneNumber, MaxAge, IncludeSwapDate},
+      *RequestOptions) (*Response, error)
+    POST /verify/sim-swap. Whether the number's SIM changed within maxAge hours
+    (1-2400; the carrier's default when omitted). includeSwapDate: true adds
+    latestSimChange (no extra charge). Roles: api, admin, developer.
+    Returns { checkId, phoneNumber, swapped, maxAge, latestSimChange?, cost }.
+
+  StartNumberVerification(ctx, StartNumberVerificationParams{PhoneNumber,
+      DevicePhoneNumber, RedirectURL}, *RequestOptions) (*Response, error)
+    POST /verify/number. Returns 201 { checkId, phoneNumber, status: "PENDING",
+    authorizationUrl, expiresAt }. The end user's phone must open
+    authorizationUrl on mobile data (Wi-Fi off) within 10 minutes.
+    devicePhoneNumber is the phone's own number, sent to the carrier as a login
+    hint; redirectUrl (https) receives the browser afterwards with ?checkId=...
+    Roles: api, admin, developer.
+
+  GetNumberVerification(ctx, GetNumberVerificationParams{CheckID},
+      *RequestOptions) (*Response, error)
+    GET /verify/number/:checkId. Returns { checkId, phoneNumber, status,
+    devicePhoneNumberVerified, failureReason, createdAt, expiresAt,
+    completedAt, cost }. status: PENDING, VERIFIED, NOT_VERIFIED, FAILED or
+    EXPIRED; failureReason: NOT_COMPLETED, NOT_APPLICABLE, PROVIDER_ERROR or
+    null. Only VERIFIED and NOT_VERIFIED are billed. 404 if not found.
+    Roles: api, admin, developer, billing, user.
 
 
 WEBHOOKS  (client.Webhooks)

@@ -85,6 +85,7 @@ type Client struct {
 	Subscriptions *SubscriptionsService
 	Tickets       *TicketsService
 	Users         *UsersService
+	Verify        *VerifyService
 	Voice         *VoiceService
 	Webhooks      *WebhooksService
 }
@@ -131,6 +132,7 @@ func NewClient(cfg Config) (*Client, error) {
 	c.Subscriptions = &SubscriptionsService{client: c, enableAdmin: cfg.EnableAdmin}
 	c.Tickets = &TicketsService{client: c, enableAdmin: cfg.EnableAdmin}
 	c.Users = &UsersService{client: c, enableAdmin: cfg.EnableAdmin}
+	c.Verify = &VerifyService{client: c}
 	c.Voice = &VoiceService{client: c}
 	c.Voice.SipTrunks = &VoiceSipTrunksService{client: c}
 	c.Voice.SipProfiles = &VoiceSipProfilesService{client: c}

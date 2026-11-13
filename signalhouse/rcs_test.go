@@ -66,6 +66,9 @@ func TestRcsAgentTransport(t *testing.T) {
 		{"POST", "/registration/" + rcsAgentID + "/launch", func() (*Response, error) {
 			return agents.Launch(ctx, RcsAgentParams{AgentID: rcsAgentID}, nil)
 		}},
+		{"POST", "/registration/" + rcsAgentID + "/carrier-update", func() (*Response, error) {
+			return agents.RequestCarrierUpdate(ctx, RcsAgentParams{AgentID: rcsAgentID}, nil)
+		}},
 		{"POST", "/rcs/agent/" + rcsAgentID + "/archive", func() (*Response, error) {
 			return agents.Archive(ctx, RcsAgentParams{AgentID: rcsAgentID}, nil)
 		}},
@@ -103,6 +106,15 @@ func TestRcsAgentTransport(t *testing.T) {
 	if _, err := agents.Submit(ctx, RcsAgentParams{}, nil); err == nil || !strings.Contains(err.Error(), "agentId") {
 		t.Fatalf("missing agentId must fail before transport: %v", err)
 	}
+	if _, err := agents.CreateEntryPoints(ctx, CreateRcsEntryPointsParams{AgentID: "RCSA/1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "POST" || last.uri != "/rcs/agent/RCSA%2F1/entry-points" || string(mustJSON(t, last.body)) != `{}` {
+		t.Fatalf("entry points escape the id and omit an empty body: %s %s %s", last.method, last.uri, mustJSON(t, last.body))
+	}
+	if _, err := agents.CreateEntryPoints(ctx, CreateRcsEntryPointsParams{Body: "Hi there"}, nil); err == nil || !strings.Contains(err.Error(), "agentId") {
+		t.Fatalf("missing agentId must fail before transport: %v", err)
+	}
 }
 
 func TestRcsMessageTransport(t *testing.T) {
@@ -137,6 +149,16 @@ func TestRcsMessageTransport(t *testing.T) {
 		t.Fatalf("missing agentId must fail before transport: %v", err)
 	}
 	if _, err := messages.Send(ctx, SendRcsMessageParams{AgentID: rcsAgentID}, nil); err == nil || !strings.Contains(err.Error(), "recipients") {
+		t.Fatalf("missing recipients must fail before transport: %v", err)
+	}
+
+	if _, err := messages.SendBatch(ctx, SendRcsMessageParams{AgentID: rcsAgentID, Recipients: recipients, TemplateID: "T1"}, &RequestOptions{IdempotencyKey: "k2"}); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "POST" || last.uri != "/message/rcs/batch" || last.header.Get("Idempotency-Key") != "k2" {
+		t.Fatalf("send batch contract: %s %s", last.method, last.uri)
+	}
+	if _, err := messages.SendBatch(ctx, SendRcsMessageParams{AgentID: rcsAgentID}, nil); err == nil || !strings.Contains(err.Error(), "recipients") {
 		t.Fatalf("missing recipients must fail before transport: %v", err)
 	}
 
@@ -453,6 +475,20 @@ func (in fixtureInput) strs(key string) []string {
 	return list
 }
 
+func (in fixtureInput) autofill() map[string]RcsAgentAutofillMarker {
+	values, ok := in["autofill"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	markers := map[string]RcsAgentAutofillMarker{}
+	for path, value := range values {
+		marker := fixtureInput(value.(map[string]any))
+		edited, _ := marker["edited"].(bool)
+		markers[path] = RcsAgentAutofillMarker{Source: marker.str("source"), SourceID: marker.str("sourceId"), At: marker.str("at"), Edited: edited}
+	}
+	return markers
+}
+
 func (in fixtureInput) recipients() []map[string]any {
 	values, _ := in["recipients"].([]any)
 	list := make([]map[string]any, len(values))
@@ -484,6 +520,8 @@ func runFixture(ctx context.Context, client *Client, operation string, in fixtur
 	switch operation {
 	case "messages.send":
 		_, err = messages.Send(ctx, in.send(), nil)
+	case "messages.sendBatch":
+		_, err = messages.SendBatch(ctx, in.send(), nil)
 	case "messages.validate":
 		_, err = messages.Validate(ctx, in.send(), nil)
 	case "messages.estimate":
@@ -501,15 +539,19 @@ func runFixture(ctx context.Context, client *Client, operation string, in fixtur
 	case "agents.get":
 		_, err = agents.Get(ctx, agent, nil)
 	case "agents.update":
-		_, err = agents.Update(ctx, UpdateRcsAgentParams{AgentID: in.str("agentId"), Agent: in["agent"], Testers: in.strs("testers")}, nil)
+		_, err = agents.Update(ctx, UpdateRcsAgentParams{AgentID: in.str("agentId"), Agent: in["agent"], Consent: in["consent"], Testers: in.strs("testers"), Autofill: in.autofill()}, nil)
 	case "agents.validate":
 		_, err = agents.Validate(ctx, agent, nil)
 	case "agents.submit":
 		_, err = agents.Submit(ctx, agent, nil)
 	case "agents.launch":
 		_, err = agents.Launch(ctx, agent, nil)
+	case "agents.requestCarrierUpdate":
+		_, err = agents.RequestCarrierUpdate(ctx, agent, nil)
 	case "agents.archive":
 		_, err = agents.Archive(ctx, agent, nil)
+	case "agents.createEntryPoints":
+		_, err = agents.CreateEntryPoints(ctx, CreateRcsEntryPointsParams{AgentID: in.str("agentId"), Body: in.str("body")}, nil)
 	case "agents.resendTesterInvite":
 		_, err = agents.ResendTesterInvite(ctx, ResendRcsTesterInviteParams{AgentID: in.str("agentId"), PhoneNumber: in.str("phoneNumber")}, nil)
 	case "agents.removeTester":

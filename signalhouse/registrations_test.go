@@ -106,6 +106,28 @@ func TestRegionalReportQueries(t *testing.T) {
 	}
 }
 
+func TestConsentRecordsQuery(t *testing.T) {
+	server, last := newCaptureServer(t)
+	client, err := NewClient(Config{APIKey: "test", BaseURL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	params := GetConsentRecordsParams{GroupID: "G1", RecipientPhoneNumber: "15555550100", StartDate: "2026-12-01", EndDate: "2026-12-31", Page: "2", Limit: "50"}
+	if _, err := client.Messages.GetConsentRecords(ctx, params, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.method != "GET" || last.uri != "/message/dnc/consent-records?endDate=2026-12-31&groupId=G1&limit=50&page=2&recipientPhoneNumber=15555550100&startDate=2026-12-01" {
+		t.Fatalf("consent records request: %s %s", last.method, last.uri)
+	}
+	if _, err := client.Messages.GetConsentRecords(ctx, GetConsentRecordsParams{GroupID: "G1"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if last.uri != "/message/dnc/consent-records?groupId=G1" {
+		t.Fatalf("unset filters sent: %s", last.uri)
+	}
+}
+
 func TestRegistrationTransport(t *testing.T) {
 	server, last := newCaptureServer(t)
 	client, err := NewClient(Config{APIKey: "test", BaseURL: server.URL, EnableAdmin: true})

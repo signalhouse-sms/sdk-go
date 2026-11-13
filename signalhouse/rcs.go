@@ -102,6 +102,19 @@ type RcsAgentFallback struct {
 	From string `json:"from,omitempty"`
 }
 
+// RcsAgentAutofillMarker says where one prefilled field's value came from. An agent's autofill holds one per field,
+// keyed by its path (consent.optInDetails); the API marks a field edited once its value changes.
+type RcsAgentAutofillMarker struct {
+	// Source is brand, campaign or landing.
+	Source string `json:"source"`
+	// SourceID is that record's id (brand ID, campaign ID or landing page ID); empty omits it.
+	SourceID string `json:"sourceId,omitempty"`
+	// At is when the field was filled (ISO 8601); empty means now.
+	At string `json:"at,omitempty"`
+	// Edited says the value changed since.
+	Edited bool `json:"edited"`
+}
+
 // CreateRcsAgentParams are the parameters for the Create method.
 type CreateRcsAgentParams struct {
 	// BrandID is the brand: carrier brand ID, provisional UUID or _id. Required.
@@ -126,6 +139,8 @@ type CreateRcsAgentParams struct {
 	ExcludedCarriers []string
 	// Testers are tester numbers (up to 200), invited once the agent exists at the carrier; nil omits them.
 	Testers []string
+	// Autofill says where the fields you prefilled came from, by path; the API adds its own for the fields it fills. nil omits it.
+	Autofill map[string]RcsAgentAutofillMarker
 }
 
 // Create creates an agent draft on a brand, optionally with its campaign, and returns the agent (HTTP 201,
@@ -180,7 +195,8 @@ type RcsAgentParams struct {
 	AcknowledgePhi bool
 }
 
-// Get returns one agent with the live state of its brand and campaign links.
+// Get returns one agent with the live state of its brand and campaign links. googleAgentId is Google's id for the agent,
+// null until Google has created it.
 func (s *RcsAgentsService) Get(ctx context.Context, params RcsAgentParams, opts *RequestOptions) (*Response, error) {
 	path, err := rcsAgentPath(params.AgentID, "")
 	if err != nil {
@@ -219,12 +235,16 @@ type UpdateRcsAgentParams struct {
 	ExcludedCarriers []string
 	// Testers replaces the tester numbers; nil keeps them, an empty non-nil slice clears them.
 	Testers []string
+	// Autofill replaces the prefill markers; nil keeps the stored ones, and a changed field's marker turns edited.
+	Autofill map[string]RcsAgentAutofillMarker
 }
 
 // Update edits an agent while it may change (a draft, a Signal House rejection, a request for changes, or an agent in
 // testing, whose change is pushed to the carrier partner) and returns it. Agent, Consent and Contact merge field by
 // field; every other key replaces. 409 in any other status; BrandID is locked once the agent exists at the partner and
-// BillingCategory once a launch was requested.
+// BillingCategory once a launch was requested. After a carrier rejected a launch other carriers took
+// (PARTIALLY_LAUNCHED with a REJECTED carrier), only Consent and Contact may change, and nothing is pushed: send them
+// with RequestCarrierUpdate.
 func (s *RcsAgentsService) Update(ctx context.Context, params UpdateRcsAgentParams, opts *RequestOptions) (*Response, error) {
 	path, err := rcsAgentPath(params.AgentID, "")
 	if err != nil {
@@ -234,7 +254,8 @@ func (s *RcsAgentsService) Update(ctx context.Context, params UpdateRcsAgentPara
 }
 
 // Validate checks an agent against every submit requirement without writing and returns {valid, errors:
-// [{field, reason}], warnings: [{field, reason}]}.
+// [{field, reason, code?}], warnings: [{field, reason}]}. A copy-rule error at the launch gate carries the carrier
+// partner's key as code (for example OPT_IN_MSG_RATE_DISCL_MISSING).
 func (s *RcsAgentsService) Validate(ctx context.Context, params RcsAgentParams, opts *RequestOptions) (*Response, error) {
 	path, err := rcsAgentPath(params.AgentID, "/validate")
 	if err != nil {
@@ -257,7 +278,10 @@ func (s *RcsAgentsService) Submit(ctx context.Context, params RcsAgentParams, op
 // Launch requests the agent's launch: the launch requirements are checked and the agent goes to Signal House review
 // (status PENDING_REVIEW), whose approval files the launch with the carrier partner. Allowed from IN_TESTING, REJECTED
 // and CARRIER_REJECTED (409 otherwise); a failed requirement is a 400 whose details carry {code:
-// "REGISTRATION_INCOMPLETE", errors, warnings}. It sends POST /registration/:agentId/launch: the agent is a registration.
+// "REGISTRATION_INCOMPLETE", errors, warnings}, and a copy-rule error carries the carrier partner's key as its code (for
+// example OPT_IN_MSG_RATE_DISCL_MISSING). A group that has not finished account verification gets a 403 with code
+// GROUP_UNVERIFIED, and a rejected one a 403 with code GROUP_REJECTED, here and at Submit; a pending verification
+// passes. It sends POST /registration/:agentId/launch: the agent is a registration.
 // The request charges the agent's launch fees: a wallet that cannot cover them gets a 402, and the agent stays where it is. When any fee is due the request must set AcknowledgeFees, or it gets a 400 with code FEE_ACKNOWLEDGEMENT_REQUIRED and nothing is held; a launch with nothing due needs no acknowledgement. The agent's launchFees quotes what the next request charges.
 // When the agent's brand vertical is healthcare or insurance, the launch needs the protected health information (PHI) disclosure acknowledged: set AcknowledgePhi, or the request gets a 400 REGISTRATION_INCOMPLETE whose errors name consent.phiAcknowledgement. The API records the acknowledgement as consent.phiAcknowledgement {acknowledgedAt, acknowledgedBy} from the caller; the client sends only the boolean, and an agent update cannot set it. Once recorded, a later launch request needs no new acknowledgement.
 func (s *RcsAgentsService) Launch(ctx context.Context, params RcsAgentParams, opts *RequestOptions) (*Response, error) {
@@ -265,6 +289,18 @@ func (s *RcsAgentsService) Launch(ctx context.Context, params RcsAgentParams, op
 		return nil, err
 	}
 	return s.client.doJSON(ctx, "POST", fmt.Sprintf("/registration/%s/launch", url.PathEscape(params.AgentID)), launchBody(params.AcknowledgeFees, params.AcknowledgePhi), opts)
+}
+
+// RequestCarrierUpdate sends Signal House the corrected launch answers after a carrier rejected a launch other carriers
+// took, and returns the agent's registration with data.carrierUpdate. The carrier partner takes no change through its
+// API once a carrier launched, so Signal House emails it the update; edit Consent and Contact first. carrierUpdate reads
+// REQUESTED for the rejected carriers, then SENT once Signal House sent it. 409 when no carrier is REJECTED after a
+// partial launch, or an update already waits. It sends POST /registration/:agentId/carrier-update.
+func (s *RcsAgentsService) RequestCarrierUpdate(ctx context.Context, params RcsAgentParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "POST", fmt.Sprintf("/registration/%s/carrier-update", url.PathEscape(params.AgentID)), nil, opts)
 }
 
 // Archive archives an agent and returns it (status ARCHIVE_PENDING or ARCHIVED). One the carrier partner created stops
@@ -276,6 +312,29 @@ func (s *RcsAgentsService) Archive(ctx context.Context, params RcsAgentParams, o
 		return nil, err
 	}
 	return s.client.doJSON(ctx, "POST", path, nil, opts)
+}
+
+// CreateRcsEntryPointsParams are the parameters for the CreateEntryPoints method.
+type CreateRcsEntryPointsParams struct {
+	// AgentID is the agent ID. Required.
+	AgentID string
+	// Body is the message the chat opens with, prefilled on the handset (max 1,000 characters). Empty omits it.
+	Body string
+}
+
+// CreateEntryPoints makes the links that start a chat with the agent and returns { googleAgentId, deepLink, shortLink }:
+// an sms: deep link in Google's format, and a short link that redirects to it, for a QR code. With the agent's
+// defaultFallback.from, the deep link names that number, so a handset that cannot reach the agent texts it. The same
+// request returns the same short link. The links reach approved testers until a carrier launches the agent. 409 with
+// code GOOGLE_AGENT_PENDING before Google has created the agent.
+func (s *RcsAgentsService) CreateEntryPoints(ctx context.Context, params CreateRcsEntryPointsParams, opts *RequestOptions) (*Response, error) {
+	path, err := rcsAgentPath(params.AgentID, "/entry-points")
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]any{}
+	setString(body, "body", params.Body)
+	return s.client.doJSON(ctx, "POST", path, body, opts)
 }
 
 // ResendRcsTesterInviteParams are the parameters for the ResendTesterInvite method.
@@ -341,11 +400,12 @@ func (s *RcsAgentsService) UploadAsset(ctx context.Context, params UploadRcsAgen
 	return s.client.doMultipart(ctx, "POST", path, writeForm, opts)
 }
 
-// SendRcsMessageParams are the parameters for the Send and Validate methods.
+// SendRcsMessageParams are the parameters for the Send, SendBatch and Validate methods.
 type SendRcsMessageParams struct {
 	// AgentID is the agent that sends (RCSA…). Required.
 	AgentID string
-	// Recipients holds up to 100 recipients, each { phoneNumber, variables?, clientMessageId?, metadata? }. Required.
+	// Recipients holds up to 100 recipients (10,000 on SendBatch), each { phoneNumber, variables?, clientMessageId?,
+	// metadata? }. Required.
 	Recipients []map[string]any
 	// TemplateID is a template to send; exactly one of TemplateID or Content.
 	TemplateID string
@@ -387,6 +447,22 @@ func (s *RcsMessagesService) Send(ctx context.Context, params SendRcsMessagePara
 		return nil, err
 	}
 	return s.client.doJSON(ctx, "POST", "/message/rcs", body, opts)
+}
+
+// SendBatch sends an RCS message to up to 10,000 recipients in the background and returns { bulkId, status:
+// "ACCEPTED", recipientCount } (HTTP 202). The request runs Send's request checks, splits the recipients into chunks of
+// 100, and queues each chunk. Every message carries the shared bulkId; track progress with the messages list filtered by
+// bulkId (GET /message?bulkId=) and per-message webhooks. A chunk the wallet cannot cover, or that is refused after
+// acceptance, gets BLOCKED messages with blockReason INSUFFICIENT_FUNDS or SEND_REFUSED; a chunk that keeps failing gets
+// SEND_FAILED. A recipient from 19999990000 to 19999990359 makes the whole request a simulation, as on Send. Set
+// RequestOptions.IdempotencyKey to make a retry safe (same bulkId, no duplicate sends); a retry without one may send
+// duplicates.
+func (s *RcsMessagesService) SendBatch(ctx context.Context, params SendRcsMessageParams, opts *RequestOptions) (*Response, error) {
+	body, err := rcsSendBody(params)
+	if err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "POST", "/message/rcs/batch", body, opts)
 }
 
 // Validate runs a send's checks without writing anything or holding funds. It returns { valid, errors, warnings,
@@ -521,7 +597,8 @@ type GetRcsMessageParams struct {
 	MessageID string
 }
 
-// Get returns one message by its ID; an unknown ID is a 404. The same route as client.Messages.GetMessage.
+// Get returns one message by its ID; an unknown ID is a 404. The same route as client.Messages.GetMessage. A settled RCS
+// message carries carrierFeeMicros, the carrier pass-through and media surcharge it was charged.
 func (s *RcsMessagesService) Get(ctx context.Context, params GetRcsMessageParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"messageId": params.MessageID}); err != nil {
 		return nil, err
@@ -607,6 +684,7 @@ func rcsAgentCreateBody(params CreateRcsAgentParams) (map[string]any, error) {
 	setAny(body, "defaultFallback", params.DefaultFallback)
 	setSlice(body, "excludedCarriers", params.ExcludedCarriers)
 	setSlice(body, "testers", params.Testers)
+	setAutofill(body, params.Autofill)
 	return body, nil
 }
 
@@ -635,7 +713,15 @@ func rcsAgentUpdateBody(params UpdateRcsAgentParams) map[string]any {
 	}
 	setSlice(body, "excludedCarriers", params.ExcludedCarriers)
 	setSlice(body, "testers", params.Testers)
+	setAutofill(body, params.Autofill)
 	return body
+}
+
+// setAutofill sets the prefill markers when given; nil omits them.
+func setAutofill(body map[string]any, markers map[string]RcsAgentAutofillMarker) {
+	if markers != nil {
+		body["autofill"] = markers
+	}
 }
 
 // rcsAgentAssetForm validates an upload and returns its path and a writer for the kind + file multipart form.

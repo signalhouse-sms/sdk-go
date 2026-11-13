@@ -143,7 +143,8 @@ type GetMessageParams struct {
 
 // GetMessage returns one message of any type by its ID; an unknown ID is a 404. An outbound RCS message and its
 // fallback leg also carry costBreakdown, { legs: [{ messageId, channel, billed, billingClass, segments, baseMicros, carrierMicros, rated }] },
-// which is null when it cannot be computed.
+// which is null when it cannot be computed. A settled RCS message also carries carrierFeeMicros: the carrier
+// pass-through and media surcharge it was charged.
 func (s *MessagesService) GetMessage(ctx context.Context, params GetMessageParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"id": params.ID}); err != nil {
 		return nil, err
@@ -646,6 +647,42 @@ func (s *MessagesService) GetDncRecords(ctx context.Context, params GetDncRecord
 		"dateBounds":     params.DateBounds,
 	})
 	return s.client.doJSON(ctx, "GET", "/message/dnc"+qs, nil, opts)
+}
+
+// GetConsentRecordsParams are the parameters for the GetConsentRecords method.
+type GetConsentRecordsParams struct {
+	// GroupID is required.
+	GroupID string
+	// RecipientPhoneNumber filters to one handset, in any spelling; it is matched on its digits.
+	RecipientPhoneNumber string
+	// StartDate and EndDate filter occurredAt. A bare date is its whole UTC day; a timestamp is bound as sent.
+	StartDate string
+	EndDate   string
+	// Page defaults to 1. Limit defaults to 100, max 500.
+	Page  string
+	Limit string
+}
+
+// GetConsentRecords exports the group's consent ledger, newest first: one append-only record per
+// opt-out or opt-in instruction a recipient gave (a STOP or START keyword, or the confirmation of an
+// opt-out link). The ledger records only; sends do not read it. The response is
+// { data, total, page, limit }. Each record carries groupId, subgroupId, recipientPhoneNumber (the
+// handset, digits), phoneNumber (the business number, or the RCS agent id, that received the
+// instruction), scope { type, id } (CAMPAIGN, AGENT or SUBGROUP, with that campaign, agent or
+// subgroup id), clearedScopes (for OPT_IN, every { type, id } the START cleared; empty for OPT_OUT),
+// action (OPT_OUT or OPT_IN), source (KEYWORD or LINK), keyword ("LINK" for a link),
+// messageType (SMS, MMS or RCS), messageId (the inbound message id; for a link, the opt-out link's
+// id), actor { type: "RECIPIENT" }, occurredAt and createdAt.
+func (s *MessagesService) GetConsentRecords(ctx context.Context, params GetConsentRecordsParams, opts *RequestOptions) (*Response, error) {
+	qs := buildQueryString(map[string]string{
+		"groupId":              params.GroupID,
+		"recipientPhoneNumber": params.RecipientPhoneNumber,
+		"startDate":            params.StartDate,
+		"endDate":              params.EndDate,
+		"page":                 params.Page,
+		"limit":                params.Limit,
+	})
+	return s.client.doJSON(ctx, "GET", "/message/dnc/consent-records"+qs, nil, opts)
 }
 
 // SendSMSParams are the parameters for the SendSMS method.
