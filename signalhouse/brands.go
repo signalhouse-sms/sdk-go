@@ -501,6 +501,20 @@ func (s *BrandsService) GetAppealHistory(ctx context.Context, params GetAppealHi
 	return s.client.doJSON(ctx, "GET", path, nil, opts)
 }
 
+// GetBrandFeedbackParams are the parameters for the GetBrandFeedback method.
+type GetBrandFeedbackParams struct {
+	BrandID string
+}
+
+// GetBrandFeedback returns TCR's identity feedback for a brand: why TCR could not verify it (status UNVERIFIED).
+func (s *BrandsService) GetBrandFeedback(ctx context.Context, params GetBrandFeedbackParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"brandId": params.BrandID}); err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/brand/feedback/%s", url.PathEscape(params.BrandID))
+	return s.client.doJSON(ctx, "GET", path, nil, opts)
+}
+
 // SubmitAppealParams are the parameters for the SubmitAppeal method.
 type SubmitAppealParams struct {
 	BrandID          string      `json:"-"`

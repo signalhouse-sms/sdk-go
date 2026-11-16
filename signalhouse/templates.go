@@ -119,7 +119,8 @@ type PublishTemplateParams struct {
 // TEMPLATE_INVALID carrying errors and warnings; no draft is a 409 NO_DRAFT, and a draft that changed while it
 // was being published is a 409 DRAFT_CHANGED (publish again). A block whose text or image the Moderation API flags
 // is an error with code CONTENT_POLICY_FLAGGED, whose message names the category ("Content moderation flagged this
-// text: spam"). The check passes when the Moderation API fails.
+// text: spam"). The check passes when the Moderation API fails. An image URL with a variable is moderated at send
+// instead, with its value filled in, and a refused image blocks the recipient with MODERATION.
 func (s *TemplatesService) Publish(ctx context.Context, params PublishTemplateParams, opts *RequestOptions) (*Response, error) {
 	body, err := templatePublishBody(params)
 	if err != nil {
@@ -227,7 +228,8 @@ type UploadMediaParams struct {
 	File    *FileUpload
 }
 
-// UploadMedia uploads one template media file and returns the MediaAsset with its public URL (HTTP 201).
+// UploadMedia uploads one template media file and returns the MediaAsset with its public URL (HTTP 201). An image over
+// 1920 px or 5,000,000 bytes is stored compressed; variants.mms is the MMS copy of an image over the MMS size limit.
 func (s *TemplatesService) UploadMedia(ctx context.Context, params UploadMediaParams, opts *RequestOptions) (*Response, error) {
 	writeForm, err := templateMediaForm(params)
 	if err != nil {

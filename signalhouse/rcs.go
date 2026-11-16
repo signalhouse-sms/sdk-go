@@ -506,7 +506,7 @@ type EstimateRcsMessageParams struct {
 // Estimate prices an RCS draft in microdollars and returns { billingClass, segments, recipientCount, rcsLeg, fallbackLeg,
 // totals, balance, issues, warnings }; it never sends or charges. Sends POST /message/estimate with channel "rcs". The fallback's from is
 // optional for an estimate: with none, the fallback leg is priced on the channel of the agent's linked campaign.
-// rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB for one recipient, and rcsLeg.cost already holds it for every recipient; rcsLeg.cost is null with the fallback mode sms_only; a message over 100 MB adds a MEDIA_TOO_LARGE issue.
+// rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB for one recipient, and rcsLeg.cost already holds it for every recipient; rcsLeg.cost is null with the fallback mode sms_only; a message over 100 MB adds a MEDIA_TOO_LARGE issue, and an external media URL that redirects adds a MEDIA_REDIRECT issue.
 func (s *RcsMessagesService) Estimate(ctx context.Context, params EstimateRcsMessageParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"agentId": params.AgentID}); err != nil {
 		return nil, err

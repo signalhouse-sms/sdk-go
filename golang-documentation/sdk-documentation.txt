@@ -329,6 +329,10 @@ BRANDS  (client.Brands)
       *RequestOptions) (*Response, error)
     List identity status appeals for a brand.
 
+  GetBrandFeedback(ctx, GetBrandFeedbackParams{BrandID},
+      *RequestOptions) (*Response, error)
+    Read TCR's identity feedback: why TCR could not verify the brand.
+
   SubmitAppeal(ctx, SubmitAppealParams{BrandID, AppealCategories,
       Explanation, File}, *RequestOptions) (*Response, error)
     Submit a brand identity status appeal with supporting documentation.
@@ -530,6 +534,25 @@ TEMPLATES  (client.Templates)
   (publish with no draft) and DRAFT_CHANGED (publish only: the draft changed
   while it was being published; publish again).
 
+  Each variable may set missingPolicy, what a recipient with no value gets:
+  default (the variable's default, empty when none is declared), block (the
+  recipient is blocked with VARIABLE_MISSING, even with a default) or drop (the
+  send leaves out each block that uses the variable, a message block with its
+  suggestions blocks; a drop that leaves nothing to send blocks with
+  VARIABLE_MISSING). Without missingPolicy, a missing value takes the default,
+  else VARIABLE_MISSING when required, else an empty value. An empty value, or
+  one of only spaces, counts as no value.
+
+  Placeholders go in text, card titles and descriptions, button labels and
+  fallback text. A url variable may fill a whole link or media URL, and any
+  variable may fill the path, query or fragment of a URL whose scheme and host
+  are written out, percent-encoded. A dial number takes one phoneNumber variable
+  and each calendar time one dateTime variable, for the whole field. A calendar
+  title and description and postbackData take text; a location's address and
+  label take none. Publish checks where each placeholder sits
+  (PLACEHOLDER_NOT_ALLOWED); the send checks each filled field and blocks a
+  recipient whose field fails with CONTENT_INVALID.
+
   Create(ctx, CreateTemplateParams{GroupID, Name, Tag,
       Body}, *RequestOptions) (*Response, error)
     POST /template. Creates draft version 1; returns 201 {head, version, validation}.
@@ -567,7 +590,8 @@ TEMPLATES  (client.Templates)
     "CONTENT_POLICY_FLAGGED", path, message, blockId} whose message names the
     category, for example "Content moderation flagged this text: spam". The
     check passes when the Moderation API fails, and saving a draft does not
-    run it.
+    run it. An image URL with a variable is moderated at send instead, with its
+    value filled in, and a refused image blocks the recipient with MODERATION.
 
   Archive(ctx, ArchiveTemplateParams{TemplateID, GroupID},
       *RequestOptions) (*Response, error)
@@ -601,7 +625,12 @@ TEMPLATES  (client.Templates)
   UploadMedia(ctx, UploadMediaParams{GroupID, File}, *RequestOptions)
       (*Response, error)
     POST /template/media, multipart fields file + groupId. Returns 201
-    {mediaId, groupId, url, bytes, mimeType, kind, width, height, createdAt}.
+    {mediaId, groupId, url, bytes, mimeType, kind, width, height, variants,
+    createdAt}.
+    An image over 1920 px on its longest edge or over 5,000,000 bytes is
+    compressed to both, and bytes, width and height describe the stored file. An
+    image over the MMS size limit also gets an MMS copy, variants.mms {url,
+    bytes}, which an MMS fallback leg sends; variants is {} otherwise.
 
 
 
@@ -810,7 +839,8 @@ RCS MESSAGES  (client.Rcs.Messages)
     arguments as Send. Required: AgentID, Recipients
     Returns: { valid, errors, warnings, billingClass, segments,
     estimatedCostMicros, unsupportedFiles, recipients }. It runs a send's
-    checks and holds no funds. valid is true only with no errors.
+    checks and holds no funds. valid is true only with no errors. An external
+    media URL that redirects blocks its recipient with a MEDIA_REDIRECT error.
 
   Estimate(ctx, EstimateRcsMessageParams{AgentID, Recipients, RecipientCount,
       TemplateID, TemplateVersion, Content, ContentFormat, TrafficType,
@@ -823,7 +853,7 @@ RCS MESSAGES  (client.Rcs.Messages)
     Returns: { billingClass, segments, recipientCount, rcsLeg, fallbackLeg,
     totals, balance, issues, warnings }
     rcsLeg.mediaSurcharge is the carrier's surcharge on media over 5 MB for one recipient, and rcsLeg.cost already holds it for every recipient; rcsLeg.cost is null with the fallback mode sms_only; a message over 100 MB adds a MEDIA_TOO_LARGE
-    issue.
+    issue, and an external media URL that redirects adds a MEDIA_REDIRECT issue.
 
   Capabilities(ctx, RcsCapabilitiesParams{AgentID, PhoneNumbers},
       *RequestOptions) (*Response, error)
