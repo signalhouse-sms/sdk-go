@@ -17,7 +17,7 @@ type VoiceNumberRoutesService struct {
 // SetNumberRouteParams is the body for SetNumberRoute. RouteAction is required.
 // The whole route is replaced: fields the new RouteAction doesn't use are cleared.
 type SetNumberRouteParams struct {
-	RouteAction         string `json:"routeAction"`                   // "FORWARD" | "WEBRTC" | "SIP_TRUNK" | "SIP_PROFILE" | "CALL_CONTROL" | "AI" | "VOICEMAIL". Targets: FORWARD → ForwardToE164, SIP_TRUNK → RouteSipTrunkID, SIP_PROFILE → RouteSipProfileID, CALL_CONTROL → WebhookURL, AI → RouteAgentProfileID.
+	RouteAction         string `json:"routeAction"`                   // "FORWARD" | "WEBRTC" | "SIP_TRUNK" | "SIP_PROFILE" | "CALL_CONTROL" | "AI" | "VOICEMAIL" | "CALL_FLOW". Targets: FORWARD → ForwardToE164, SIP_TRUNK → RouteSipTrunkID, SIP_PROFILE → RouteSipProfileID, CALL_CONTROL → WebhookURL, AI → RouteAgentProfileID, CALL_FLOW → RouteCallFlowID.
 	ForwardToE164       string `json:"forwardToE164,omitempty"`       // FORWARD destination (required for FORWARD), or the WEBRTC no-answer destination when NoAnswerAction is "FORWARD".
 	NoAnswerAction      string `json:"noAnswerAction,omitempty"`      // WEBRTC only: "VOICEMAIL" | "FORWARD" | "KEEP_RINGING" (default "VOICEMAIL").
 	NoAnswerSeconds     *int   `json:"noAnswerSeconds,omitempty"`     // WEBRTC only: seconds to ring before the no-answer action, 5-120 (default 20).
@@ -25,6 +25,7 @@ type SetNumberRouteParams struct {
 	RouteSipProfileID   string `json:"routeSipProfileId,omitempty"`   // SIP endpoint id, required when RouteAction is "SIP_PROFILE".
 	WebhookURL          string `json:"webhookUrl,omitempty"`          // SHML program URL, required when RouteAction is "CALL_CONTROL".
 	RouteAgentProfileID string `json:"routeAgentProfileId,omitempty"` // AI agent profile id (AGP…), required when RouteAction is "AI".
+	RouteCallFlowID     string `json:"routeCallFlowId,omitempty"`     // Call flow id, required when RouteAction is "CALL_FLOW". Must be in the number's subgroup.
 	RecordingEnabled    *bool  `json:"recordingEnabled,omitempty"`    // Record calls handled by this route.
 }
 

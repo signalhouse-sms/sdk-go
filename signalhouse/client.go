@@ -64,14 +64,15 @@ type Client struct {
 	enableAdmin bool
 	httpClient  *http.Client
 
-	Agents    *AgentsService
-	Auth      *AuthService
-	Billing   *BillingService
-	Brands    *BrandsService
-	Campaigns *CampaignsService
-	Groups    *GroupsService
-	Landings  *LandingsService
-	Messages  *MessagesService
+	Agents     *AgentsService
+	Auth       *AuthService
+	Billing    *BillingService
+	Brands     *BrandsService
+	Campaigns  *CampaignsService
+	Compliance *ComplianceService
+	Groups     *GroupsService
+	Landings   *LandingsService
+	Messages   *MessagesService
 	// Templates is the message template API (/template).
 	Templates *TemplatesService
 	// Rcs groups RCS resources; client.Rcs.Agents is the RCS agent API (/rcs/agent) and client.Rcs.Messages the RCS messages.
@@ -116,6 +117,7 @@ func NewClient(cfg Config) (*Client, error) {
 	c.Billing = &BillingService{client: c}
 	c.Brands = &BrandsService{client: c}
 	c.Campaigns = &CampaignsService{client: c, enableAdmin: cfg.EnableAdmin}
+	c.Compliance = &ComplianceService{client: c}
 	c.Groups = &GroupsService{client: c, enableAdmin: cfg.EnableAdmin}
 	c.Landings = &LandingsService{client: c}
 	c.Messages = &MessagesService{client: c}
@@ -138,6 +140,7 @@ func NewClient(cfg Config) (*Client, error) {
 	c.Voice.SipProfiles = &VoiceSipProfilesService{client: c}
 	c.Voice.ProgrammableVoiceProfiles = &VoiceProgrammableVoiceProfilesService{client: c}
 	c.Voice.NumberRoutes = &VoiceNumberRoutesService{client: c}
+	c.Voice.CallFlows = &VoiceCallFlowsService{client: c}
 	c.Voice.Calls = &VoiceCallsService{client: c}
 	c.Voice.CallLogs = &VoiceCallLogsService{client: c}
 	c.Voice.Analytics = &VoiceAnalyticsService{client: c}

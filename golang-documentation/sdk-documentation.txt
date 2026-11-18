@@ -337,6 +337,9 @@ BRANDS  (client.Brands)
       Explanation, File}, *RequestOptions) (*Response, error)
     Submit a brand identity status appeal with supporting documentation.
     Uses multipart/form-data automatically.
+    TCR refusal: a 4xx (e.g. TCR code 592, brand older than 45 days) returns
+      { error: "TCR refused the appeal: <reason>", details: { code, message } }
+      with TCR's own code and message. Retrying unchanged will be refused again.
     AppealCategories: []string (VERIFY_TAX_ID, VERIFY_NON_PROFIT, VERIFY_GOVERNMENT)
     Explanation: string (max 1024 chars)
     File: io.Reader (supported: .jpg, .jpeg, .png, .bmp, .raw, .tiff, .pdf, .docx, .htm, .odt, .rtf, .txt, .xml)
@@ -373,6 +376,62 @@ CAMPAIGNS  (client.Campaigns)
     Sends a POST to /campaign/nudge/:campaignId.
     No request body required.
     Returns 200: { message: "Nudge successful" }
+
+
+COMPLIANCE  (client.Compliance)
+--------------------------------------------------------------------------------
+  Compliance cases under /compliance. Signal House opens a case when a carrier
+  suspends one of your objects, a carrier escalates a message, or Signal House
+  needs something from you. You read your cases, answer their requirements and
+  upload files; only Signal House opens, works and closes them.
+
+  Number release closes that number's alerts immediately. Eligible cases have
+  closeReason NUMBER_RELEASED; shared cases stay open for other alerts,
+  requirements or review. Released blocks include numberReleasedAt without
+  inventing liftedAt.
+
+  GetCases(ctx, GetCasesParams{GroupID, Status, Stage, ObjectType, ObjectID,
+      SubgroupID, Suspended, From, To, Sort, Page, Limit}, *RequestOptions)
+      (*Response, error)
+    GET /compliance/cases. Lists the cases you can see, newest first. Only the
+    given filters are sent. GroupID defaults to your active group. Status:
+    OPEN, LIFT_REQUESTED or CLOSED. Stage: new, customer, ready,
+    lift_requested or closed. ObjectType: CAMPAIGN, BRAND, NUMBER, RCS_AGENT
+    or SUBGROUP. Suspended (*bool): true for cases with an open suspension or
+    hold, false for the rest. From/To: ISO 8601. Sort: createdAt (default),
+    fixBy or severity. Limit: 1-200.
+    Returns { data, total, page, limit, totalPages, counts: { open,
+    waitingOnYou } }. Roles: api, admin, developer, billing, user.
+
+  GetCase(ctx, GetCaseParams{CaseID}, *RequestOptions) (*Response, error)
+    GET /compliance/cases/:caseId. Returns one case: its stage, suspensions,
+    tickets and requirements. Required: CaseID (CASE-<n>).
+    Roles: api, admin, developer, billing, user.
+
+  AnswerRequirement(ctx, AnswerRequirementParams{CaseID, RequirementID,
+      Answer, FileIDs}, *RequestOptions) (*Response, error)
+    PUT /compliance/cases/:caseId/requirements/:requirementId. Answers one
+    requirement with a note, files, or both, and returns the case. Answer: up
+    to 2,000 characters (empty omits it). FileIDs: up to 10 fileIds from
+    UploadFile on this case (nil omits it). A RECORDS requirement needs a file
+    or a note. Required: CaseID, RequirementID.
+    Roles: api, admin, developer, user.
+
+  UploadFile(ctx, UploadFileParams{CaseID, RequirementID, File},
+      *RequestOptions) (*Response, error)
+    POST /compliance/files, multipart fields caseId + requirementId (only when
+    set) + file. CSV, XLSX, PDF, PNG, JPG or TXT, up to 10 MB. Returns 201
+    { fileId, fileName, mimeType, size }; pass fileId in FileIDs when you
+    answer the requirement. Required: CaseID, File.
+    Roles: api, admin, developer, user.
+
+  GetFile(ctx, GetFileParams{FileID}, *RequestOptions) (*Response, error)
+    GET /compliance/files/:fileId. Downloads a compliance file. The body is
+    the raw file, not JSON: Response.Data holds the bytes unchanged.
+    Required: FileID. Roles: api, admin, developer, billing, user.
+
+  Set RequestOptions.IdempotencyKey on AnswerRequirement and UploadFile to
+  make a retry safe (see IDEMPOTENT REQUESTS).
 
 
 GROUPS  (client.Groups)
@@ -1163,6 +1222,7 @@ WEBHOOKS  (client.Webhooks)
     - client.Landings.UpdateLanding(...)
     - client.Brands.SubmitAppeal(...)
     - client.Templates.UploadMedia(...)
+    - client.Compliance.UploadFile(...)
 
   You do not need to construct multipart writers manually. Pass file data
   via io.Reader fields in the params struct and the SDK builds the form

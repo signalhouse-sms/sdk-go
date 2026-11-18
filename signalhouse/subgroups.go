@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 )
 
 // SubgroupsService handles subgroup-related API calls.
@@ -49,6 +50,73 @@ func (s *SubgroupsService) GetSubgroupCounts(ctx context.Context, params GetSubg
 		"offset":     params.Offset,
 	})
 	return s.client.doJSON(ctx, "GET", "/subgroup/counts"+qs, nil, opts)
+}
+
+// LookupGhlLocationParams are the parameters for the LookupGhlLocation method. Provide exactly one of
+// GhlLocationID or SubgroupID.
+type LookupGhlLocationParams struct {
+	GroupID       string
+	GhlLocationID string
+	SubgroupID    string
+}
+
+// LookupGhlLocation resolves the mapping between a GoHighLevel location and a Signal House subgroup,
+// in either direction. GroupID is optional - customer roles default to their own accessible group(s)
+// and are rejected if they name a group they don't belong to; a SubgroupID/GhlLocationID that belongs
+// to a different group than the caller's returns a 404, identical to a nonexistent one.
+func (s *SubgroupsService) LookupGhlLocation(ctx context.Context, params LookupGhlLocationParams, opts *RequestOptions) (*Response, error) {
+	qs := buildQueryString(map[string]string{
+		"groupId":       params.GroupID,
+		"ghlLocationId": params.GhlLocationID,
+		"subgroupId":    params.SubgroupID,
+	})
+	return s.client.doJSON(ctx, "GET", "/subgroup/ghl-location-lookup"+qs, nil, opts)
+}
+
+// LinkGhlLocationParams are the parameters for the LinkGhlLocation method. Requires signalhouse_api or
+// signalhouse_admin role. GhlLocationID nil unlinks; a non-nil GhlLocationID links, stealing it from any
+// other subgroup that currently holds it. GhlLocationName is omitted from the request entirely when nil,
+// leaving the subgroup's currently stored name untouched (never cleared, and only when GhlLocationID is
+// unchanged - otherwise it is cleared); it is ignored when unlinking. ClaimedAt is required when
+// GhlLocationID is non-nil: it is when this link was locally claimed by the caller, used to detect and
+// reject a delayed/out-of-order push whose claim has since been superseded by a newer one recorded
+// elsewhere; ignored when unlinking.
+type LinkGhlLocationParams struct {
+	SubgroupID      string
+	GhlLocationID   *string
+	GhlLocationName *string
+	ClaimedAt       *time.Time
+}
+
+// MarshalJSON encodes the link body, omitting ghlLocationName entirely when nil (so the stored name is
+// preserved, not cleared), and encoding ghlLocationId as JSON null when nil (unlink).
+func (p LinkGhlLocationParams) MarshalJSON() ([]byte, error) {
+	body := struct {
+		SubgroupID      string           `json:"subgroupId"`
+		GhlLocationID   *string          `json:"ghlLocationId"`
+		GhlLocationName *json.RawMessage `json:"ghlLocationName,omitempty"`
+		ClaimedAt       *time.Time       `json:"claimedAt,omitempty"`
+	}{SubgroupID: p.SubgroupID, GhlLocationID: p.GhlLocationID, ClaimedAt: p.ClaimedAt}
+	if p.GhlLocationName != nil {
+		raw, err := json.Marshal(*p.GhlLocationName)
+		if err != nil {
+			return nil, err
+		}
+		rawMsg := json.RawMessage(raw)
+		body.GhlLocationName = &rawMsg
+	}
+	return json.Marshal(body)
+}
+
+// LinkGhlLocation links (or, with GhlLocationID nil, unlinks) a GoHighLevel location to a subgroup.
+func (s *SubgroupsService) LinkGhlLocation(ctx context.Context, params LinkGhlLocationParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"subgroupId": params.SubgroupID}); err != nil {
+		return nil, err
+	}
+	if params.GhlLocationID != nil && params.ClaimedAt == nil {
+		return nil, &ValidationError{Field: "claimedAt"}
+	}
+	return s.client.doJSON(ctx, "PUT", "/subgroup/ghl-location-link", params, opts)
 }
 
 // CreateSubgroupData represents the data for creating a subgroup.

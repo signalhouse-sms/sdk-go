@@ -20,6 +20,9 @@ type VoiceService struct {
 	// NumberRoutes — per-number inbound route (overrides the profile and subgroup settings).
 	NumberRoutes *VoiceNumberRoutesService
 
+	// CallFlows — customer-built call trees a number or profile can run.
+	CallFlows *VoiceCallFlowsService
+
 	// Calls — outbound call origination and call log queries.
 	Calls *VoiceCallsService
 

@@ -524,6 +524,11 @@ type SubmitAppealParams struct {
 }
 
 // SubmitAppeal submits an appeal for a brand with a file attachment.
+//
+// When TCR refuses the appeal itself (a 4xx, e.g. code 592 for a brand older
+// than 45 days), the error body is {"error": "TCR refused the appeal: <reason>",
+// "details": {"code", "message"}} with TCR's own code and message. Retrying
+// unchanged is refused again.
 func (s *BrandsService) SubmitAppeal(ctx context.Context, params SubmitAppealParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{
 		"brandId":     params.BrandID,

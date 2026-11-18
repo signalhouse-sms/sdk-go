@@ -22,12 +22,13 @@ type CreateProgrammableVoiceProfileParams struct {
 	Name                string   `json:"name"`
 	SubgroupIDs         []string `json:"subgroupIds"`
 	Region              string   `json:"region,omitempty"`
-	RouteAction         string   `json:"routeAction,omitempty"` // "FORWARD" | "WEBRTC" | "SIP_TRUNK" | "SIP_PROFILE" | "CALL_CONTROL" (default "FORWARD"). Targets: FORWARD → ForwardToE164, SIP_TRUNK → RouteSipTrunkID, SIP_PROFILE → RouteSipProfileID, CALL_CONTROL → WebhookURL.
+	RouteAction         string   `json:"routeAction,omitempty"` // "FORWARD" | "WEBRTC" | "SIP_TRUNK" | "SIP_PROFILE" | "CALL_CONTROL" | "CALL_FLOW" (default "FORWARD"). Targets: FORWARD → ForwardToE164, SIP_TRUNK → RouteSipTrunkID, SIP_PROFILE → RouteSipProfileID, CALL_CONTROL → WebhookURL, CALL_FLOW → RouteCallFlowID.
 	ForwardToE164       string   `json:"forwardToE164,omitempty"`
 	ForwardAfterSeconds *int     `json:"forwardAfterSeconds,omitempty"`
 	RouteSipTrunkID     string   `json:"routeSipTrunkId,omitempty"`   // SIP trunk id, required when RouteAction is "SIP_TRUNK".
 	RouteSipProfileID   string   `json:"routeSipProfileId,omitempty"` // SIP endpoint id, required when RouteAction is "SIP_PROFILE".
 	WebhookURL          string   `json:"webhookUrl,omitempty"`        // Inbound voice webhook / SHML program URL, required when RouteAction is "CALL_CONTROL".
+	RouteCallFlowID     string   `json:"routeCallFlowId,omitempty"`   // Call flow id, required when RouteAction is "CALL_FLOW". Must be in one of the profile's subgroups.
 	RecordingEnabled    *bool    `json:"recordingEnabled,omitempty"`
 	Enabled             *bool    `json:"enabled,omitempty"`
 }
@@ -38,12 +39,13 @@ type UpdateProgrammableVoiceProfileParams struct {
 	Name                string   `json:"name,omitempty"`
 	SubgroupIDs         []string `json:"subgroupIds,omitempty"`
 	Region              string   `json:"region,omitempty"`
-	RouteAction         string   `json:"routeAction,omitempty"` // "FORWARD" | "WEBRTC" | "SIP_TRUNK" | "SIP_PROFILE" | "CALL_CONTROL". Targets: FORWARD → ForwardToE164, SIP_TRUNK → RouteSipTrunkID, SIP_PROFILE → RouteSipProfileID, CALL_CONTROL → WebhookURL.
+	RouteAction         string   `json:"routeAction,omitempty"` // "FORWARD" | "WEBRTC" | "SIP_TRUNK" | "SIP_PROFILE" | "CALL_CONTROL" | "CALL_FLOW". Targets: FORWARD → ForwardToE164, SIP_TRUNK → RouteSipTrunkID, SIP_PROFILE → RouteSipProfileID, CALL_CONTROL → WebhookURL, CALL_FLOW → RouteCallFlowID.
 	ForwardToE164       string   `json:"forwardToE164,omitempty"`
 	ForwardAfterSeconds *int     `json:"forwardAfterSeconds,omitempty"`
 	RouteSipTrunkID     string   `json:"routeSipTrunkId,omitempty"`   // SIP trunk id, required when RouteAction is "SIP_TRUNK".
 	RouteSipProfileID   string   `json:"routeSipProfileId,omitempty"` // SIP endpoint id, required when RouteAction is "SIP_PROFILE".
 	WebhookURL          string   `json:"webhookUrl,omitempty"`        // Inbound voice webhook / SHML program URL, required when RouteAction is "CALL_CONTROL".
+	RouteCallFlowID     string   `json:"routeCallFlowId,omitempty"`   // Call flow id, required when RouteAction is "CALL_FLOW". Must be in one of the profile's subgroups.
 	RecordingEnabled    *bool    `json:"recordingEnabled,omitempty"`
 	Enabled             *bool    `json:"enabled,omitempty"`
 }
