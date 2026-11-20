@@ -58,8 +58,9 @@ type UpdateCallFlowParams struct {
 type CallFlowStep struct {
 	// ID is a UUID you generate. It is kept as the step's id across saves.
 	ID string `json:"id"`
-	// Type is the step kind: "inbound", "answer", "play", "ivr", "fwd_phone",
-	// "voicemail" or "hangup". GetCallFlowCatalog lists the kinds this service runs.
+	// Type is the step kind: "inbound", "answer", "play", "sms", "ivr",
+	// "fwd_phone", "voicemail" or "hangup". GetCallFlowCatalog lists the kinds this
+	// service runs.
 	Type string `json:"type"`
 	// Name is the display name.
 	Name string `json:"name"`

@@ -203,6 +203,65 @@ func (s *GroupsService) DeleteSsoConnection(ctx context.Context, groupID string,
 	return s.client.doJSON(ctx, "DELETE", "/group/sso"+qs, nil, opts)
 }
 
+// GetOntraportConnection returns a group's Ontraport connection status: whether it's connected, and the
+// webhook URL to paste into an Ontraport automation's "Send to a Webhook" step. Never includes the API
+// Key or App ID ({ connected, webhookUrl, enabled }).
+func (s *GroupsService) GetOntraportConnection(ctx context.Context, groupID string, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": groupID}); err != nil {
+		return nil, err
+	}
+	qs := buildQueryString(map[string]string{"groupId": groupID})
+	return s.client.doJSON(ctx, "GET", "/group/ontraport"+qs, nil, opts)
+}
+
+// ConnectOntraportParams are the parameters for the ConnectOntraport method.
+type ConnectOntraportParams struct {
+	GroupID string `json:"groupId"`
+	// APIKey is the Ontraport API Key.
+	APIKey string `json:"apiKey"`
+	// AppID is the Ontraport App ID.
+	AppID string `json:"appId"`
+}
+
+// ConnectOntraport connects (or reconnects) a group's Ontraport account. The API Key and App ID are
+// verified with a read-only call to Ontraport before anything is stored; a bad pair returns an error
+// rather than saving. Returns the Ontraport connection status ({ connected, webhookUrl, enabled }).
+// Requires a Signal House Admin to have enabled featureFlags.ontraportIntegration for the group first
+// (opt-in, off by default) - otherwise this returns a validation error.
+func (s *GroupsService) ConnectOntraport(ctx context.Context, params ConnectOntraportParams, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{
+		"groupId": params.GroupID,
+		"apiKey":  params.APIKey,
+		"appId":   params.AppID,
+	}); err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "PUT", "/group/ontraport", params, opts)
+}
+
+// DisconnectOntraport disconnects (disables) a group's Ontraport account. The webhook stops accepting
+// deliveries immediately; stored credentials and contact links are kept, so reconnecting the same
+// account resumes cleanly. The primary self-service way to kill a leaked webhook URL. Returns the
+// Ontraport connection status ({ connected, webhookUrl, enabled }).
+func (s *GroupsService) DisconnectOntraport(ctx context.Context, groupID string, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": groupID}); err != nil {
+		return nil, err
+	}
+	qs := buildQueryString(map[string]string{"groupId": groupID})
+	return s.client.doJSON(ctx, "DELETE", "/group/ontraport"+qs, nil, opts)
+}
+
+// RegenerateOntraportWebhookToken mints a fresh webhook token for an existing Ontraport connection,
+// immediately invalidating the old URL. A second self-service way to kill a leaked webhook URL, for
+// when the customer wants to keep sending (unlike DisconnectOntraport) but needs a new URL to paste
+// into a rebuilt automation. Returns the Ontraport connection status ({ connected, webhookUrl, enabled }).
+func (s *GroupsService) RegenerateOntraportWebhookToken(ctx context.Context, groupID string, opts *RequestOptions) (*Response, error) {
+	if err := require(map[string]string{"groupId": groupID}); err != nil {
+		return nil, err
+	}
+	return s.client.doJSON(ctx, "PUT", "/group/ontraport/regenerate-token", map[string]string{"groupId": groupID}, opts)
+}
+
 // SsoDomainParams are the parameters for the AddSsoDomain, VerifySsoDomain and RemoveSsoDomain methods.
 type SsoDomainParams struct {
 	GroupID string `json:"groupId"`

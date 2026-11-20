@@ -478,6 +478,20 @@ GROUPS  (client.Groups)
     DELETE /group/sso/domains/:domain?groupId=. Remove a domain from the
     group's SSO.
 
+  Ontraport (role admin, developer, signalhouse_admin). Every Ontraport
+  method returns the connection status: { connected, webhookUrl, enabled }.
+
+  GetOntraportConnection(ctx, groupID, *RequestOptions) (*Response, error)
+    GET /group/ontraport?groupId=. Get a group's Ontraport connection status
+    (never includes the API Key or App ID).
+
+  ConnectOntraport(ctx, ConnectOntraportParams{GroupID, APIKey, AppID},
+      *RequestOptions) (*Response, error)
+    PUT /group/ontraport. Connect (or reconnect) the group's Ontraport
+    account. The API Key and App ID are verified with a read-only call to
+    Ontraport before anything is stored; a bad pair returns an error rather
+    than saving. Required: GroupID, APIKey, AppID.
+
 
 LANDINGS  (client.Landings)
 --------------------------------------------------------------------------------
@@ -572,6 +586,7 @@ MESSAGES  (client.Messages)
   CarrierIdLookup(ctx, CarrierIdLookupParams{PhoneNumber}, opts)
     Look up the carrier for a phone number.
     Always performs a fresh lookup (not cached). Billed per request.
+    An Australian number on ACMA's list of numbers reserved for TV, film and creative works is refused with a 400 as an invalid number, without a lookup or a charge.
     Required: PhoneNumber (10+ digits, no + prefix)
     Returns: { phoneNumber, carrier, carrierFamily, carrierRegion, ported, type, degradedConfidence, cost }
 
