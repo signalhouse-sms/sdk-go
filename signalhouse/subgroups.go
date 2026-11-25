@@ -19,16 +19,20 @@ type GetSubgroupsParams struct {
 	GroupID string
 	Page    string
 	Limit   string
+	// Search narrows the list; every value must match. A value is free text or "field:term", where field is
+	// subgroupId, subgroupName or subgroupCompanyName. Each term is 3 to 100 characters; at most 5 values. Each value
+	// is sent as its own search key.
+	Search []string
 }
 
 // GetSubgroups returns a list of subgroups with optional filters.
 func (s *SubgroupsService) GetSubgroups(ctx context.Context, params GetSubgroupsParams, opts *RequestOptions) (*Response, error) {
-	qs := buildQueryString(map[string]string{
+	qs := buildQueryStringRepeated(map[string]string{
 		"id":      params.ID,
 		"groupId": params.GroupID,
 		"page":    params.Page,
 		"limit":   params.Limit,
-	})
+	}, map[string][]string{"search": params.Search})
 	return s.client.doJSON(ctx, "GET", "/subgroup"+qs, nil, opts)
 }
 
@@ -134,9 +138,14 @@ type CreateSubgroupData struct {
 	Country             string `json:"country,omitempty"`
 	PostalCode          string `json:"postalCode,omitempty"`
 	Phone               string `json:"phone,omitempty"`
-	// CarrierIDFamily and CarrierIDRegion require signalhouse_api, signalhouse_admin,
-	// signalhouse_user, api, admin, developer, or billing role when set.
+	// CarrierIDFamily requires signalhouse_api, signalhouse_admin, signalhouse_user, api,
+	// admin, developer, or billing role when set.
+	//
+	// Deprecated: accepted and stored, with no effect on billing.
 	CarrierIDFamily string `json:"carrierIdFamily,omitempty"`
+	// CarrierIDRegion has the same role requirement as CarrierIDFamily.
+	//
+	// Deprecated: accepted and stored, with no effect on billing.
 	CarrierIDRegion string `json:"carrierIdRegion,omitempty"`
 }
 
@@ -165,9 +174,14 @@ type UpdateSubgroupData struct {
 	PostalCode          string `json:"postalCode,omitempty"`
 	Phone               string `json:"phone,omitempty"`
 	Status              string `json:"status,omitempty"`
-	// CarrierIDFamily and CarrierIDRegion require signalhouse_api, signalhouse_admin,
-	// signalhouse_user, api, admin, developer, or billing role when set.
+	// CarrierIDFamily requires signalhouse_api, signalhouse_admin, signalhouse_user, api,
+	// admin, developer, or billing role when set.
+	//
+	// Deprecated: accepted and stored, with no effect on billing.
 	CarrierIDFamily string `json:"carrierIdFamily,omitempty"`
+	// CarrierIDRegion has the same role requirement as CarrierIDFamily.
+	//
+	// Deprecated: accepted and stored, with no effect on billing.
 	CarrierIDRegion string `json:"carrierIdRegion,omitempty"`
 	// CnamAutoApply turns caller name (CNAM) auto-apply on or off for the subgroup's numbers.
 	CnamAutoApply *bool `json:"cnamAutoApply,omitempty"`

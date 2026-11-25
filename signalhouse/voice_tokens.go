@@ -50,6 +50,10 @@ type CreateTokenParams struct {
 	// TTL is the token TTL in seconds. Clamped to the server's max.
 	// Defaults to VOICE_TOKEN_DEFAULT_TTL_SEC.
 	TTL int `json:"ttl,omitempty"`
+	// SubgroupID is the subgroup whose inbound calls ring this identity.
+	// Required to receive calls, and to register the device for mobile push
+	// (client.Voice.PushDevices).
+	SubgroupID string `json:"subgroupId,omitempty"`
 	// Grants are the capability grants attached to the token.
 	Grants *VoiceGrants `json:"grants,omitempty"`
 }

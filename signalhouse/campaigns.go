@@ -34,6 +34,10 @@ type GetCampaignsParams struct {
 	Status     string
 	// RegistrationType optionally filters by "TEN_DLC", "TOLL_FREE", or "SHORT_CODE".
 	RegistrationType string
+	// Search narrows the list; every value must match. A value is free text or "field:term", where field is
+	// campaignId or brandId. Free text matches campaignId, and also brandId on a staff read of every campaign. Each
+	// term is 3 to 100 characters; at most 5 values. Each value is sent as its own search key.
+	Search []string
 }
 
 // GetCampaigns returns a list of campaigns with optional filters.
@@ -62,7 +66,7 @@ type GetCampaignsParams struct {
 // carrier, so `status` stays ACTIVE. Subscribe to the CAMPAIGN_SUSPENDED / CAMPAIGN_UNSUSPENDED webhook events
 // to be told when an entry opens or is lifted.
 func (s *CampaignsService) GetCampaigns(ctx context.Context, params GetCampaignsParams, opts *RequestOptions) (*Response, error) {
-	qs := buildQueryString(map[string]string{
+	qs := buildQueryStringRepeated(map[string]string{
 		"id":               params.ID,
 		"brandId":          params.BrandID,
 		"subgroupId":       params.SubgroupID,
@@ -71,7 +75,7 @@ func (s *CampaignsService) GetCampaigns(ctx context.Context, params GetCampaigns
 		"limit":            params.Limit,
 		"status":           params.Status,
 		"registrationType": params.RegistrationType,
-	})
+	}, map[string][]string{"search": params.Search})
 	return s.client.doJSON(ctx, "GET", "/campaign"+qs, nil, opts)
 }
 

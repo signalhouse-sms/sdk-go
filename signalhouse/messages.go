@@ -97,6 +97,8 @@ type GetMessagesParams struct {
 // Inbound messages in the response also carry sentimentScore (-100..100, null when unscored),
 // sentimentLabel ("positive", "neutral" or "negative", null when sentimentScore is null) and
 // sentimentScoredAt. Outbound messages are never scored.
+// Inbound messages also carry inReplyToMessageId: the message the reply answers, absent when there is none. If that
+// message has a parentMessageId, it was an RCS fallback, and the parent is the RCS message you sent.
 func (s *MessagesService) GetMessages(ctx context.Context, params GetMessagesParams, opts *RequestOptions) (*Response, error) {
 	qs := buildQueryString(map[string]string{
 		"id":                   params.ID,
@@ -145,6 +147,8 @@ type GetMessageParams struct {
 // fallback leg also carry costBreakdown, { legs: [{ messageId, channel, billed, billingClass, segments, baseMicros, carrierMicros, rated }] },
 // which is null when it cannot be computed. A settled RCS message also carries carrierFeeMicros: the carrier
 // pass-through and media surcharge it was charged.
+// Inbound messages also carry inReplyToMessageId: the message the reply answers, absent when there is none. If that
+// message has a parentMessageId, it was an RCS fallback, and the parent is the RCS message you sent.
 func (s *MessagesService) GetMessage(ctx context.Context, params GetMessageParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"id": params.ID}); err != nil {
 		return nil, err
@@ -742,6 +746,8 @@ type SendP2PParams struct {
 }
 
 // SendP2P sends a P2P message via Rogue Mobile SMPP.
+//
+// Deprecated: P2P messaging is retired and the API answers 410. This method will be removed in a future major release.
 func (s *MessagesService) SendP2P(ctx context.Context, params SendP2PParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{
 		"messageBody": params.MessageBody,
@@ -760,6 +766,8 @@ type GetP2PBatchParams struct {
 }
 
 // GetP2PBatch returns a P2P batch by its ID.
+//
+// Deprecated: P2P messaging is retired and the API answers 410. This method will be removed in a future major release.
 func (s *MessagesService) GetP2PBatch(ctx context.Context, params GetP2PBatchParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"batchId": params.BatchID}); err != nil {
 		return nil, err

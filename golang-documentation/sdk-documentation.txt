@@ -211,8 +211,14 @@ BILLING  (client.Billing)
 BRANDS  (client.Brands)
 --------------------------------------------------------------------------------
   GetBrands(ctx, GetBrandsParams{ID, SubgroupID, GroupID, Page, Limit,
-      Status, CurrentTollFreeCarrier}, *RequestOptions) (*Response, error)
+      Status, CurrentTollFreeCarrier, Search}, *RequestOptions) (*Response, error)
     List brands with filters.
+    Search ([]string): each value is sent as its own search key, and every
+    value must match. A value is free text or "field:term", where field is
+    brandId, displayName, companyName, ein, email, groupId, subgroupId or
+    referenceId. Free text matches brandId, displayName and companyName on
+    a group or subgroup read, and all eight fields on a staff read of every
+    brand. Each term is 3 to 100 characters; at most 5 values.
     CurrentTollFreeCarrier (*bool): with GroupID or SubgroupID, true returns
     only the toll-free brands a new toll-free campaign in that group can use.
     Each toll-free brand carries tollFree.reviewsBusinessOnSubmit: whether
@@ -348,8 +354,13 @@ BRANDS  (client.Brands)
 CAMPAIGNS  (client.Campaigns)
 --------------------------------------------------------------------------------
   GetCampaigns(ctx, GetCampaignsParams{ID, BrandID, SubgroupID, GroupID,
-      Page, Limit, Status}, *RequestOptions) (*Response, error)
+      Page, Limit, Status, Search}, *RequestOptions) (*Response, error)
     List campaigns with filters.
+    Search ([]string): each value is sent as its own search key, and every
+    value must match. A value is free text or "field:term", where field is
+    campaignId or brandId. Free text matches campaignId, and also brandId on
+    a staff read of every campaign. Each term is 3 to 100 characters; at
+    most 5 values.
 
   CreateCampaign(ctx, CreateCampaignParams{CampaignData},
       *RequestOptions) (*Response, error)
@@ -535,6 +546,10 @@ MESSAGES  (client.Messages)
     carrierMicros, rated }] }, which is null when it cannot be computed.
     A settled RCS message also carries carrierFeeMicros, the carrier
     pass-through and media surcharge it was charged.
+    Inbound messages also carry inReplyToMessageId: the message the reply
+    answers, absent when there is none. If that message has a
+    parentMessageId, it was an RCS fallback, and the parent is the RCS
+    message you sent.
 
   GetMessageInteractions(ctx, GetMessageInteractionsParams{ID}, *RequestOptions) (*Response, error)
     GET /message/:id/interactions. The taps on one RCS message, oldest first. Required: ID
@@ -988,13 +1003,17 @@ NUMBERS  (client.Numbers)
 --------------------------------------------------------------------------------
   GetPhoneNumbers(ctx, GetPhoneNumbersParams{PhoneNumber, CampaignID,
       RegistrationID, BrandID, SubgroupID, GroupID, Page, Limit,
-      CurrentTollFreeCarrier, Released}, *RequestOptions) (*Response, error)
+      CurrentTollFreeCarrier, Released, Search}, *RequestOptions) (*Response, error)
     List your phone numbers with filters.
     RegistrationID: filter to numbers provisioned under this registration.
     CurrentTollFreeCarrier (*bool): with GroupID or SubgroupID, true returns
     only the toll-free numbers a new toll-free campaign in that group can use.
     Released (*bool): with SubgroupID or GroupID, true returns only its
     released numbers (status RELEASED) instead of its active ones.
+    Search ([]string): each value is sent as its own search key, and every
+    value must match. A value is free text or "field:term", where field is
+    phoneNumber or friendlyName; a phone-like term matches the number's
+    digits. Each term is 3 to 100 characters; at most 5 values.
 
   GetNumberHealth(ctx, phoneNumber, *RequestOptions) (*Response, error)
     Get the health score, the same one the portal shows, (1–10) for an owned phone number.
@@ -1090,22 +1109,26 @@ SHORTLINKS  (client.Shortlinks)
 
 SUBGROUPS  (client.Subgroups)
 --------------------------------------------------------------------------------
-  GetSubgroups(ctx, GetSubgroupsParams{ID, GroupID, Page, Limit},
+  GetSubgroups(ctx, GetSubgroupsParams{ID, GroupID, Page, Limit, Search},
       *RequestOptions) (*Response, error)
     List subgroups with filters.
+    Search ([]string): each value is sent as its own search key, and every
+    value must match. A value is free text or "field:term", where field is
+    subgroupId, subgroupName or subgroupCompanyName. Each term is 3 to 100
+    characters; at most 5 values.
 
   CreateSubgroup(ctx, CreateSubgroupParams{SubgroupData},
       *RequestOptions) (*Response, error)
     Create a new subgroup.
-    CreateSubgroupData includes optional CarrierIDFamily and CarrierIDRegion.
-    Setting CarrierIDFamily or CarrierIDRegion requires signalhouse_api,
+    CreateSubgroupData includes CarrierIDFamily and CarrierIDRegion. Deprecated: accepted and
+    stored, with no effect on billing. Setting them requires signalhouse_api,
     signalhouse_admin, signalhouse_user, api, admin, developer, or billing role.
 
   UpdateSubgroup(ctx, UpdateSubgroupParams{ID, UpdateData},
       *RequestOptions) (*Response, error)
     Update subgroup details.
-    UpdateSubgroupData includes optional CarrierIDFamily and CarrierIDRegion.
-    Setting CarrierIDFamily or CarrierIDRegion requires signalhouse_api,
+    UpdateSubgroupData includes CarrierIDFamily and CarrierIDRegion. Deprecated: accepted and
+    stored, with no effect on billing. Setting them requires signalhouse_api,
     signalhouse_admin, signalhouse_user, api, admin, developer, or billing role.
     UpdateSubgroupData also includes optional CnamAutoApply (*bool) and
     CnamBrandID (*string); set ClearCnamBrandID to send cnamBrandId as null.

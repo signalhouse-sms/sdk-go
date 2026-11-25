@@ -37,4 +37,10 @@ type VoiceService struct {
 
 	// Tokens — mint ephemeral SIP credentials for the browser voice SDK.
 	Tokens *VoiceTokensService
+
+	// PushCredentials — mobile push: the Apple/Firebase credentials that wake your app for calls.
+	PushCredentials *VoicePushCredentialsService
+
+	// PushDevices — mobile push: register a device (called by the app with its voice token).
+	PushDevices *VoicePushDevicesService
 }

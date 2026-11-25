@@ -39,6 +39,10 @@ type GetPhoneNumbersParams struct {
 	// Released, when true with SubgroupID or GroupID, returns only its released numbers (status RELEASED) instead of
 	// its active ones.
 	Released *bool
+	// Search narrows the list; every value must match. A value is free text or "field:term", where field is
+	// phoneNumber or friendlyName; a phone-like term matches the number's digits. Each term is 3 to 100 characters;
+	// at most 5 values. Each value is sent as its own search key.
+	Search []string
 }
 
 // GetPhoneNumbers returns a list of phone numbers with optional filters.
@@ -60,7 +64,7 @@ type GetPhoneNumbersParams struct {
 // campaign's own summed counters, never averaged from its numbers. For a live figure use GET /number/health
 // or GET /campaign/health.
 func (s *NumbersService) GetPhoneNumbers(ctx context.Context, params GetPhoneNumbersParams, opts *RequestOptions) (*Response, error) {
-	qs := buildQueryString(map[string]string{
+	qs := buildQueryStringRepeated(map[string]string{
 		"phoneNumber":            params.PhoneNumber,
 		"campaignId":             params.CampaignID,
 		"registrationId":         params.RegistrationID,
@@ -71,7 +75,7 @@ func (s *NumbersService) GetPhoneNumbers(ctx context.Context, params GetPhoneNum
 		"limit":                  params.Limit,
 		"currentTollFreeCarrier": boolQueryValue(params.CurrentTollFreeCarrier),
 		"released":               boolQueryValue(params.Released),
-	})
+	}, map[string][]string{"search": params.Search})
 	return s.client.doJSON(ctx, "GET", "/number"+qs, nil, opts)
 }
 

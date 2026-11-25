@@ -146,6 +146,8 @@ func NewClient(cfg Config) (*Client, error) {
 	c.Voice.Analytics = &VoiceAnalyticsService{client: c}
 	c.Voice.GlobalVoiceSettings = &VoiceGlobalVoiceSettingsService{client: c}
 	c.Voice.Tokens = &VoiceTokensService{client: c}
+	c.Voice.PushCredentials = &VoicePushCredentialsService{client: c}
+	c.Voice.PushDevices = &VoicePushDevicesService{client: c}
 	c.Webhooks = &WebhooksService{client: c}
 
 	// Initialize admin sub-services when enabled
@@ -200,10 +202,23 @@ func requireNonNil(fields map[string]interface{}) error {
 
 // buildQueryString builds a URL query string from key-value pairs, omitting empty values.
 func buildQueryString(params map[string]string) string {
+	return buildQueryStringRepeated(params, nil)
+}
+
+// buildQueryStringRepeated builds a URL query string like buildQueryString, and also sends each non-empty value in
+// repeated as its own key, so a key such as "search" appears once per value.
+func buildQueryStringRepeated(params map[string]string, repeated map[string][]string) string {
 	q := url.Values{}
 	for k, v := range params {
 		if v != "" {
 			q.Set(k, v)
+		}
+	}
+	for k, values := range repeated {
+		for _, v := range values {
+			if v != "" {
+				q.Add(k, v)
+			}
 		}
 	}
 	encoded := q.Encode()

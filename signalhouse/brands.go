@@ -30,6 +30,11 @@ type GetBrandsParams struct {
 	// CurrentTollFreeCarrier, when true with GroupID or SubgroupID, returns only the toll-free brands a new toll-free
 	// campaign in that group can use.
 	CurrentTollFreeCarrier *bool
+	// Search narrows the list; every value must match. A value is free text or "field:term", where field is brandId,
+	// displayName, companyName, ein, email, groupId, subgroupId or referenceId. Free text matches brandId, displayName
+	// and companyName on a group or subgroup read, and all eight fields on a staff read of every brand. Each term is 3
+	// to 100 characters; at most 5 values. Each value is sent as its own search key.
+	Search []string
 }
 
 // GetBrands returns a list of brands with optional filters. brandId may be null until carrier assignment.
@@ -40,7 +45,7 @@ type GetBrandsParams struct {
 // `tollFree.contactEmail`, `tollFree.contactJobTitle`, `tollFree.contactJobLevel` and `tollFree.rejectionReason` (why
 // its review rejected it, in plain English, or null).
 func (s *BrandsService) GetBrands(ctx context.Context, params GetBrandsParams, opts *RequestOptions) (*Response, error) {
-	qs := buildQueryString(map[string]string{
+	qs := buildQueryStringRepeated(map[string]string{
 		"id":                     params.ID,
 		"subgroupId":             params.SubgroupID,
 		"groupId":                params.GroupID,
@@ -49,7 +54,7 @@ func (s *BrandsService) GetBrands(ctx context.Context, params GetBrandsParams, o
 		"status":                 params.Status,
 		"registrationType":       params.RegistrationType,
 		"currentTollFreeCarrier": boolQueryValue(params.CurrentTollFreeCarrier),
-	})
+	}, map[string][]string{"search": params.Search})
 	return s.client.doJSON(ctx, "GET", "/brand"+qs, nil, opts)
 }
 

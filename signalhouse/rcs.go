@@ -599,6 +599,7 @@ type GetRcsMessageParams struct {
 
 // Get returns one message by its ID; an unknown ID is a 404. The same route as client.Messages.GetMessage. A settled RCS
 // message carries carrierFeeMicros, the carrier pass-through and media surcharge it was charged.
+// An inbound RCS message also carries inReplyToMessageId: the message it answers, absent when there is none.
 func (s *RcsMessagesService) Get(ctx context.Context, params GetRcsMessageParams, opts *RequestOptions) (*Response, error) {
 	if err := require(map[string]string{"messageId": params.MessageID}); err != nil {
 		return nil, err
