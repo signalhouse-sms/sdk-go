@@ -255,9 +255,9 @@ type TollFreeCampaignDetails struct {
 
 // CreateTollFreeCampaignData represents the data for creating a Toll-Free (TFN) campaign.
 // registrationType is forced to TOLL_FREE server-side — do not set it here. PrivacyPolicyLink is required when the
-// brand's tollFree.requiresPrivacyPolicy is true and the brand has no privacyPolicyLink of its own, and
-// TermsAndConditionsLink when its tollFree.requiresTermsAndConditions is true and it has no termsAndConditionsLink;
-// both are optional otherwise.
+// brand's tollFree.requiresPrivacyPolicy is true and neither the brand nor the referenced Toll-Free landing page
+// (tollFree.landingId) supplies one, and TermsAndConditionsLink likewise for tollFree.requiresTermsAndConditions;
+// both are optional otherwise. Precedence: campaign, brand, landing page.
 type CreateTollFreeCampaignData struct {
 	BrandID                string                  `json:"brandId"`
 	TollFree               TollFreeCampaignDetails `json:"tollFree"`
